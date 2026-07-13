@@ -35,10 +35,9 @@
 ;;   - AOJ (Aizu Online Judge)
 ;;
 ;; Features provided by this package:
-;;   - `jejeje-prepare'   : Fetch contest/problem samples from a URL or ID
+;;   - `jejeje-prepare'   : Select a judge/contest interactively, then fetch samples
 ;;   - `jejeje-test'      : Run test cases against your solution
 ;;   - `jejeje-info'      : Display contest metadata
-;;   - `jejeje-contests'  : Browse available contest lists per judge
 ;;   - `jejeje-config-get': Read a configuration value
 ;;   - `jejeje-config-set': Write a configuration value
 ;;   - `jejeje-menu'      : Transient menu for all commands
@@ -102,6 +101,39 @@ The buffer is created if it does not already exist."
    (rx (seq ?\e ?\[ (zero-or-more (any "0-9;")) (any "A-Za-z")))
    ""
    str))
+
+(defun jejeje--fetch-contests (judge &optional limit)
+  "Synchronously fetch contest list for JUDGE via `je contests'.
+Returns an alist of (DISPLAY-STRING . ID) pairs suitable for `completing-read',
+or nil on failure.
+LIMIT is an optional integer cap on the number of contests returned."
+  (with-temp-buffer
+    (let* ((process-environment (cons "NO_COLOR=1" process-environment))
+           (args (append (list "contests" judge)
+                         (when limit (list "--limit" (number-to-string limit)))))
+           (exit-code (apply #'call-process jejeje-executable nil t nil args)))
+      (if (= 0 exit-code)
+          (let (results)
+            (goto-char (point-min))
+            (while (not (eobp))
+              (let ((line (buffer-substring-no-properties
+                           (line-beginning-position) (line-end-position))))
+                ;; Format: "<id> — <name> (<url>)"
+                (when (string-match
+                       (rx bol
+                           (group (one-or-more (not (any " "))))  ; id
+                           " \u2014 "
+                           (group (one-or-more anychar))           ; name
+                           " ("
+                           (group "http" (optional "s") "://" (one-or-more (not (any ")"))))  ; url
+                           ")")
+                       line)
+                  (let ((id   (match-string 1 line))
+                        (name (match-string 2 line)))
+                    (push (cons (format "%s  [%s]" name id) id) results))))
+              (forward-line 1))
+            (nreverse results))
+        nil))))
 
 (defun jejeje--run (args output-buffer &optional sentinel)
   "Start `je' asynchronously with ARGS, streaming output into OUTPUT-BUFFER.
@@ -193,9 +225,26 @@ Provides syntax highlighting for AC, WA, TLE, RE, and SKIP verdicts."
 ;;;###autoload
 (defun jejeje-prepare (query)
   "Run `je prepare QUERY' to fetch contest/problem samples.
-QUERY can be a URL (https://…), a shorthand ID (e.g. \"abc123\",
-\"cf1234\"), or a free-text contest name for fuzzy search."
-  (interactive "sje prepare — URL / ID / query: ")
+When called interactively, first select a judge, then pick a contest
+from the fetched list.  QUERY becomes the selected contest ID."
+  (interactive
+   (let* ((judge (completing-read "Judge: "
+                                  '("atcoder" "codeforces" "yukicoder" "aoj")
+                                  nil t))
+          (_ (message "jejeje: fetching %s contests …" judge))
+          (candidates (jejeje--fetch-contests judge))
+          (query
+           (if candidates
+               (let* ((choice (completing-read
+                                (format "Contest [%s]: " judge)
+                                candidates nil t))
+                      (id (cdr (assoc choice candidates))))
+                 (or id choice))
+             ;; Fallback: manual entry when fetch fails
+             (progn
+               (message "jejeje: failed to fetch contest list — enter ID/URL manually")
+               (read-string "je prepare — URL / ID / query: ")))))
+     (list query)))
   (let ((buf (jejeje--get-output-buffer)))
     (with-current-buffer buf
       (special-mode))
@@ -267,31 +316,6 @@ Walks up from `default-directory' to find `.je-meta.json'."
            (message "jejeje: `je info' failed — no .je-meta.json found? See %s"
                     jejeje-buffer-name)))))))
 
-;;;###autoload
-(defun jejeje-contests (judge &optional limit)
-  "Display contest list for JUDGE using `je contests'.
-JUDGE is selected interactively from the supported judges.
-LIMIT defaults to 20 (the `je' default); prefix arg sets a custom limit."
-  (interactive
-   (list (completing-read "Judge: "
-                          '("atcoder" "codeforces" "yukicoder" "aoj")
-                          nil t)
-         (when current-prefix-arg
-           (read-number "Limit: " 20))))
-  (let ((buf (jejeje--get-output-buffer "*jejeje-contests*")))
-    (with-current-buffer buf
-      (special-mode))
-    (display-buffer buf)
-    (message "jejeje: fetching %s contests …" judge)
-    (jejeje--run
-     (append (list "contests" judge)
-             (when limit (list "--limit" (number-to-string limit))))
-     buf
-     (lambda (proc event)
-       (when (string-match-p "finished\\|exited" event)
-         (if (= 0 (process-exit-status proc))
-             (message "jejeje: %s contest list loaded" judge)
-           (message "jejeje: `je contests' failed — see *jejeje-contests*")))))))
 
 ;;;###autoload
 (defun jejeje-config-get (key)
@@ -340,8 +364,7 @@ Pass an empty VALUE to clear the setting."
   ["jejeje"
    ["Contest"
     ("p" "Prepare samples"  jejeje-prepare)
-    ("i" "Contest info"     jejeje-info)
-    ("l" "List contests"    jejeje-contests)]
+    ("i" "Contest info"     jejeje-info)]
    ["Test"
     ("t" "Run tests"        jejeje-test)]
    ["Config"
@@ -357,7 +380,6 @@ Pass an empty VALUE to clear the setting."
     (define-key map (kbd "p") #'jejeje-prepare)
     (define-key map (kbd "t") #'jejeje-test)
     (define-key map (kbd "i") #'jejeje-info)
-    (define-key map (kbd "l") #'jejeje-contests)
     (define-key map (kbd "G") #'jejeje-config-get)
     (define-key map (kbd "S") #'jejeje-config-set)
     (define-key map (kbd "m") #'jejeje-menu)
