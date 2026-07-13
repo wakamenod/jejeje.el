@@ -38,8 +38,6 @@
 ;;   - `jejeje-prepare'   : Select a judge/contest interactively, then fetch samples
 ;;   - `jejeje-test'      : Run test cases against your solution
 ;;   - `jejeje-info'      : Display contest metadata
-;;   - `jejeje-config-get': Read a configuration value
-;;   - `jejeje-config-set': Write a configuration value
 ;;   - `jejeje-menu'      : Transient menu for all commands
 ;;
 ;; Quick start:
@@ -317,46 +315,6 @@ Walks up from `default-directory' to find `.je-meta.json'."
                     jejeje-buffer-name)))))))
 
 
-;;;###autoload
-(defun jejeje-config-get (key)
-  "Show the current value of configuration KEY via `je config KEY'.
-Supported keys: template_dir."
-  (interactive "sConfig key: ")
-  (let ((buf (jejeje--get-output-buffer)))
-    (with-current-buffer buf
-      (special-mode))
-    (display-buffer buf)
-    (jejeje--run
-     (list "config" key)
-     buf
-     (lambda (proc event)
-       (when (string-match-p "finished\\|exited" event)
-         (if (= 0 (process-exit-status proc))
-             (message "jejeje: config %s loaded" key)
-           (message "jejeje: `je config %s' failed — see %s" key jejeje-buffer-name)))))))
-
-;;;###autoload
-(defun jejeje-config-set (key value)
-  "Set configuration KEY to VALUE via `je config KEY VALUE'.
-Supported keys: template_dir.
-Pass an empty VALUE to clear the setting."
-  (interactive
-   (let ((k (read-string "Config key: ")))
-     (list k (read-string (format "Value for %s: " k)))))
-  (let ((buf (jejeje--get-output-buffer)))
-    (with-current-buffer buf
-      (special-mode))
-    (display-buffer buf)
-    (jejeje--run
-     (list "config" key value)
-     buf
-     (lambda (proc event)
-       (when (string-match-p "finished\\|exited" event)
-         (if (= 0 (process-exit-status proc))
-             (message "jejeje: set %s = %s" key value)
-           (message "jejeje: `je config %s' failed — see %s" key jejeje-buffer-name)))))))
-
-
 ;;; ─── Transient menu ───────────────────────────────────────────────────────────
 
 (transient-define-prefix jejeje-menu ()
@@ -367,9 +325,7 @@ Pass an empty VALUE to clear the setting."
     ("i" "Contest info"     jejeje-info)]
    ["Test"
     ("t" "Run tests"        jejeje-test)]
-   ["Config"
-    ("G" "Get config"       jejeje-config-get)
-    ("S" "Set config"       jejeje-config-set)]])
+   ])
 
 
 ;;; ─── Key map ──────────────────────────────────────────────────────────────────
@@ -380,8 +336,6 @@ Pass an empty VALUE to clear the setting."
     (define-key map (kbd "p") #'jejeje-prepare)
     (define-key map (kbd "t") #'jejeje-test)
     (define-key map (kbd "i") #'jejeje-info)
-    (define-key map (kbd "G") #'jejeje-config-get)
-    (define-key map (kbd "S") #'jejeje-config-set)
     (define-key map (kbd "m") #'jejeje-menu)
     map)
   "Prefix key map for jejeje commands.

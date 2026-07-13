@@ -15,7 +15,6 @@ Supported online judges via the ~je~ tool:
 - *~jejeje-prepare~*: Interactively select a judge and contest from a fetched list, then fetch problem samples.
 - *~jejeje-test~*: Run test cases against your solution with syntax-highlighted results (~je-test-mode~).
 - *~jejeje-info~*: Display contest metadata from ~.je-meta.json~.
-- *~jejeje-config-get~* / *~set~*: Manage ~je~ CLI configuration values.
 - *~jejeje-menu~*: A convenient, interactive [[https://github.com/magit/transient][Transient]] popup menu for all commands.
 
 * Prerequisites
@@ -107,8 +106,6 @@ Inside ~jejeje-map~, the following default single-key bindings are available:
 - ~p~ : ~jejeje-prepare~
 - ~t~ : ~jejeje-test~
 - ~i~ : ~jejeje-info~
-- ~G~ : ~jejeje-config-get~
-- ~S~ : ~jejeje-config-set~
 - ~m~ : ~jejeje-menu~
 
 * Development
