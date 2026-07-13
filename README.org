@@ -15,6 +15,7 @@ Supported online judges via the ~je~ tool:
 - *~jejeje-prepare~*: Interactively select a judge and contest from a fetched list, then fetch problem samples.
 - *~jejeje-test~*: Run test cases against your solution with syntax-highlighted results (~je-test-mode~).  The run command is derived automatically from the current buffer's file type via [[https://github.com/emacsorphanage/quickrun][quickrun]] (no prompt needed).  Use ~C-u~ to override the command for a single invocation.
 - *~jejeje-info~*: Display contest metadata from ~.je-meta.json~.
+- *~jejeje-browse-problem~*: Open the current problem's web page inside Emacs.  Reads ~.je-meta.json~ from the nearest ancestor directory and matches the current directory name (e.g. ~a~, ~b~) against the task list.  Uses ~xwidget-webkit-browse-url~ when available, falling back to ~browse-url~.
 - *~jejeje-menu~*: A convenient, interactive [[https://github.com/magit/transient][Transient]] popup menu for all commands.
 
 * Prerequisites
@@ -122,6 +123,7 @@ Inside ~jejeje-map~, the following default single-key bindings are available:
 - ~p~ : ~jejeje-prepare~
 - ~t~ : ~jejeje-test~
 - ~i~ : ~jejeje-info~
+- ~w~ : ~jejeje-browse-problem~
 - ~m~ : ~jejeje-menu~
 
 * Development

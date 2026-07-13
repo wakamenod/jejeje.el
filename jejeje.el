@@ -47,6 +47,7 @@
 ;;; Code:
 
 (require 'ansi-color)
+(require 'json)
 (require 'transient)
 (require 'quickrun)
 
@@ -235,6 +236,41 @@ set `jejeje-test-command' manually"
       ;; Single step: interpreter-style
       (cons nil (format-spec exec spec)))))
 
+(defun jejeje--find-meta-json ()
+  "Walk up the directory tree from `default-directory' to find `.je-meta.json'.
+Returns the absolute path to the file if found, or nil if no such file exists
+in any ancestor directory up to the filesystem root."
+  (let ((dir (expand-file-name default-directory)))
+    (catch 'found
+      (while t
+        (let ((candidate (expand-file-name ".je-meta.json" dir)))
+          (when (file-readable-p candidate)
+            (throw 'found candidate)))
+        (let ((parent (file-name-directory (directory-file-name dir))))
+          (when (string= parent dir)
+            ;; Reached the filesystem root without finding the file
+            (throw 'found nil))
+          (setq dir parent))))))
+
+(defun jejeje--read-meta-json (path)
+  "Read and parse the `.je-meta.json' file at PATH.
+Returns a hash-table as produced by `json-parse-string' with keys as symbols.
+Signals `user-error' if the file cannot be read or parsed."
+  (condition-case err
+      (with-temp-buffer
+        (insert-file-contents path)
+        (json-parse-string (buffer-string) :object-type 'hash-table :array-type 'array))
+    (error
+     (user-error "jejeje: failed to parse %s: %s" path (error-message-string err)))))
+
+(defun jejeje--current-task-id ()
+  "Return the task ID inferred from the current `default-directory'.
+The task ID is the name of the innermost directory, lowercased.
+For example, a directory path ending in \".../abc001/a/\" returns \"a\"."
+  (file-name-nondirectory
+   (directory-file-name (expand-file-name default-directory))))
+
+
 ;;; ─── Major mode for test results ──────────────────────────────────────────────
 
 (defvar je-test-mode-font-lock-keywords
@@ -393,6 +429,44 @@ Walks up from `default-directory' to find `.je-meta.json'."
                     jejeje-buffer-name)))))))
 
 
+;;;###autoload
+(defun jejeje-browse-problem ()
+  "Open the current problem's web page inside Emacs.
+
+Reads `.je-meta.json' by walking up from `default-directory', then
+looks up the task whose `id' matches the innermost directory name
+\(e.g. \"a\", \"b\", \"ITP1_1_A\").  Opens the matching task URL with
+`xwidget-webkit-browse-url' when available, or `browse-url' otherwise.
+
+If no matching task is found the contest top-level URL is opened and a
+notice is shown in the minibuffer."
+  (interactive)
+  (let* ((meta-path (or (jejeje--find-meta-json)
+                        (user-error "jejeje: no .je-meta.json found in %s or any parent directory"
+                                    default-directory)))
+         (meta      (jejeje--read-meta-json meta-path))
+         (tasks     (gethash "tasks" meta))
+         (task-id   (downcase (jejeje--current-task-id)))
+         ;; Search tasks vector for a matching id (case-insensitive)
+         (matched-url
+          (catch 'found
+            (when (arrayp tasks)
+              (seq-doseq (task tasks)
+                (when (string= (downcase (gethash "id" task "")) task-id)
+                  (throw 'found (gethash "url" task)))))
+            nil))
+         (contest-url (gethash "url" meta))
+         (url (or matched-url
+                  (progn
+                    (message "jejeje: task id %S not found in contest — opening contest page"
+                             task-id)
+                    contest-url)))
+         (open-fn (if (fboundp 'xwidget-webkit-browse-url)
+                      #'xwidget-webkit-browse-url
+                    #'browse-url)))
+    (funcall open-fn url)))
+
+
 ;;; ─── Transient menu ───────────────────────────────────────────────────────────
 
 (transient-define-prefix jejeje-menu ()
@@ -400,7 +474,8 @@ Walks up from `default-directory' to find `.je-meta.json'."
   ["jejeje"
    ["Contest"
     ("p" "Prepare samples"  jejeje-prepare)
-    ("i" "Contest info"     jejeje-info)]
+    ("i" "Contest info"     jejeje-info)
+    ("w" "Browse problem"   jejeje-browse-problem)]
    ["Test"
     ("t" "Run tests"        jejeje-test)]
    ])
@@ -414,6 +489,7 @@ Walks up from `default-directory' to find `.je-meta.json'."
     (define-key map (kbd "p") #'jejeje-prepare)
     (define-key map (kbd "t") #'jejeje-test)
     (define-key map (kbd "i") #'jejeje-info)
+    (define-key map (kbd "w") #'jejeje-browse-problem)
     (define-key map (kbd "m") #'jejeje-menu)
     map)
   "Prefix key map for jejeje commands.

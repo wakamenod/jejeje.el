@@ -324,5 +324,264 @@ the format-spec expansion path."
       (should-error (jejeje--auto-command) :type 'user-error))))
 
 
+;;; ─── Helpers for filesystem-based tests ──────────────────────────────────────
+
+(defmacro jejeje-test--with-temp-dir (&rest body)
+  "Evaluate BODY with `default-directory' set to a fresh temporary directory.
+The directory and its contents are deleted with `delete-directory' after BODY
+exits (normally or via a non-local exit)."
+  (declare (indent 0))
+  (let ((dir-sym (gensym "jejeje-test-dir")))
+    `(let ((,dir-sym (make-temp-file "jejeje-test-" t)))
+       (unwind-protect
+           (let ((default-directory (file-name-as-directory ,dir-sym)))
+             ,@body)
+         (delete-directory ,dir-sym t)))))
+
+(defun jejeje-test--write-file (path content)
+  "Write string CONTENT to PATH, creating parent directories as needed."
+  (make-directory (file-name-directory path) t)
+  (with-temp-file path
+    (insert content)))
+
+(defconst jejeje-test--sample-meta-json
+  (json-encode
+   `((judge        . "atcoder")
+     (contest_id   . "abc001")
+     (contest_name . "AtCoder Beginner Contest 001")
+     (url          . "https://atcoder.jp/contests/abc001")
+     (tasks        . [((id  . "a")
+                       (name . "Two Sum")
+                       (url  . "https://atcoder.jp/contests/abc001/tasks/abc001_a"))
+                      ((id  . "b")
+                       (name . "Difference")
+                       (url  . "https://atcoder.jp/contests/abc001/tasks/abc001_b"))])))
+  "Canonical sample `.je-meta.json' content used across multiple tests.")
+
+
+;;; ─── jejeje--find-meta-json ───────────────────────────────────────────────────
+
+(ert-deftest jejeje-find-meta-json/found-in-current-dir ()
+  "Returns the path when `.je-meta.json' exists in `default-directory'."
+  (jejeje-test--with-temp-dir
+    (let ((meta (expand-file-name ".je-meta.json" default-directory)))
+      (jejeje-test--write-file meta "{}")
+      (should (equal meta (jejeje--find-meta-json))))))
+
+(ert-deftest jejeje-find-meta-json/found-in-parent-dir ()
+  "Returns the path when `.je-meta.json' lives one level up."
+  (jejeje-test--with-temp-dir
+    (let* ((meta (expand-file-name ".je-meta.json" default-directory))
+           (sub  (file-name-as-directory (expand-file-name "a" default-directory))))
+      (jejeje-test--write-file meta "{}")
+      (make-directory sub t)
+      (let ((default-directory sub))
+        (should (equal meta (jejeje--find-meta-json)))))))
+
+(ert-deftest jejeje-find-meta-json/found-two-levels-up ()
+  "Returns the path when `.je-meta.json' is two directories above."
+  (jejeje-test--with-temp-dir
+    (let* ((meta   (expand-file-name ".je-meta.json" default-directory))
+           (nested (file-name-as-directory
+                    (expand-file-name "abc001/a" default-directory))))
+      (jejeje-test--write-file meta "{}")
+      (make-directory nested t)
+      (let ((default-directory nested))
+        (should (equal meta (jejeje--find-meta-json)))))))
+
+(ert-deftest jejeje-find-meta-json/returns-nil-when-absent ()
+  "Returns nil when `.je-meta.json' cannot be found in any ancestor."
+  (jejeje-test--with-temp-dir
+    ;; No .je-meta.json written — should return nil without signalling.
+    (should (null (jejeje--find-meta-json)))))
+
+
+;;; ─── jejeje--read-meta-json ───────────────────────────────────────────────────
+
+(ert-deftest jejeje-read-meta-json/returns-hash-table ()
+  "Parses valid JSON and returns a hash-table."
+  (jejeje-test--with-temp-dir
+    (let ((path (expand-file-name ".je-meta.json" default-directory)))
+      (jejeje-test--write-file path jejeje-test--sample-meta-json)
+      (let ((result (jejeje--read-meta-json path)))
+        (should (hash-table-p result))))))
+
+(ert-deftest jejeje-read-meta-json/top-level-fields ()
+  "Top-level fields (judge, contest_id, url) are accessible by string keys."
+  (jejeje-test--with-temp-dir
+    (let ((path (expand-file-name ".je-meta.json" default-directory)))
+      (jejeje-test--write-file path jejeje-test--sample-meta-json)
+      (let ((result (jejeje--read-meta-json path)))
+        (should (equal "atcoder"  (gethash "judge"      result)))
+        (should (equal "abc001"   (gethash "contest_id" result)))
+        (should (equal "https://atcoder.jp/contests/abc001"
+                       (gethash "url" result)))))))
+
+(ert-deftest jejeje-read-meta-json/tasks-is-array ()
+  "The `tasks' field is parsed as an array (vector)."
+  (jejeje-test--with-temp-dir
+    (let ((path (expand-file-name ".je-meta.json" default-directory)))
+      (jejeje-test--write-file path jejeje-test--sample-meta-json)
+      (let ((result (jejeje--read-meta-json path)))
+        (should (arrayp (gethash "tasks" result)))))))
+
+(ert-deftest jejeje-read-meta-json/task-fields ()
+  "Each task element exposes `id', `name', and `url' as string keys."
+  (jejeje-test--with-temp-dir
+    (let ((path (expand-file-name ".je-meta.json" default-directory)))
+      (jejeje-test--write-file path jejeje-test--sample-meta-json)
+      (let* ((result (jejeje--read-meta-json path))
+             (task-a (aref (gethash "tasks" result) 0)))
+        (should (equal "a"        (gethash "id"   task-a)))
+        (should (equal "Two Sum"  (gethash "name" task-a)))
+        (should (equal "https://atcoder.jp/contests/abc001/tasks/abc001_a"
+                       (gethash "url" task-a)))))))
+
+(ert-deftest jejeje-read-meta-json/invalid-json-signals-user-error ()
+  "Signals `user-error' for malformed JSON."
+  (jejeje-test--with-temp-dir
+    (let ((path (expand-file-name ".je-meta.json" default-directory)))
+      (jejeje-test--write-file path "{ not valid json }")
+      (should-error (jejeje--read-meta-json path) :type 'user-error))))
+
+(ert-deftest jejeje-read-meta-json/missing-file-signals-user-error ()
+  "Signals `user-error' when the file does not exist."
+  (jejeje-test--with-temp-dir
+    (let ((path (expand-file-name "nonexistent.json" default-directory)))
+      (should-error (jejeje--read-meta-json path) :type 'user-error))))
+
+
+;;; ─── jejeje--current-task-id ─────────────────────────────────────────────────
+
+(ert-deftest jejeje-current-task-id/returns-innermost-dir-name ()
+  "Returns the name of the innermost directory."
+  (jejeje-test--with-temp-dir
+    (let* ((sub (file-name-as-directory (expand-file-name "a" default-directory))))
+      (make-directory sub t)
+      (let ((default-directory sub))
+        (should (equal "a" (jejeje--current-task-id)))))))
+
+(ert-deftest jejeje-current-task-id/trailing-slash-stripped ()
+  "A trailing slash in `default-directory' does not affect the result."
+  (jejeje-test--with-temp-dir
+    (let* ((sub (expand-file-name "b/" default-directory)))
+      (make-directory sub t)
+      (let ((default-directory sub))
+        (should (equal "b" (jejeje--current-task-id)))))))
+
+(ert-deftest jejeje-current-task-id/preserves-case ()
+  "The function does not alter the case of the directory name."
+  (jejeje-test--with-temp-dir
+    (let* ((sub (file-name-as-directory
+                 (expand-file-name "ITP1_1_A" default-directory))))
+      (make-directory sub t)
+      (let ((default-directory sub))
+        (should (equal "ITP1_1_A" (jejeje--current-task-id)))))))
+
+(ert-deftest jejeje-current-task-id/nested-path ()
+  "Only the leaf directory name is returned, not the full path."
+  (jejeje-test--with-temp-dir
+    (let* ((sub (file-name-as-directory
+                 (expand-file-name "abc001/c" default-directory))))
+      (make-directory sub t)
+      (let ((default-directory sub))
+        (should (equal "c" (jejeje--current-task-id)))))))
+
+
+;;; ─── jejeje-browse-problem ────────────────────────────────────────────────────
+
+(defmacro jejeje-test--with-browse-spy (open-fn-sym &rest body)
+  "Evaluate BODY with a spy capturing calls to OPEN-FN-SYM.
+After BODY, the variable `jejeje-test--browse-calls' holds a list of URLs
+that were passed to OPEN-FN-SYM."
+  (declare (indent 1))
+  `(let (jejeje-test--browse-calls)
+     (cl-letf (((symbol-function ,open-fn-sym)
+                (lambda (url)
+                  (push url jejeje-test--browse-calls))))
+       ,@body)))
+
+(defmacro jejeje-test--with-browse-problem-env (task-id &rest body)
+  "Set up a temp dir with `.je-meta.json' and `default-directory' as TASK-ID sub-dir.
+Evaluates BODY inside that sub-directory."
+  (declare (indent 1))
+  `(jejeje-test--with-temp-dir
+     (jejeje-test--write-file
+      (expand-file-name ".je-meta.json" default-directory)
+      jejeje-test--sample-meta-json)
+     (let* ((sub (file-name-as-directory
+                  (expand-file-name ,task-id default-directory))))
+       (make-directory sub t)
+       (let ((default-directory sub))
+         ,@body))))
+
+(ert-deftest jejeje-browse-problem/opens-matching-task-url ()
+  "Opens the task URL whose `id' matches the current directory name."
+  (jejeje-test--with-browse-problem-env "a"
+    (jejeje-test--with-browse-spy 'browse-url
+      (cl-letf (((symbol-function 'xwidget-webkit-browse-url) nil))
+        (jejeje-browse-problem))
+      (should (equal '("https://atcoder.jp/contests/abc001/tasks/abc001_a")
+                     jejeje-test--browse-calls)))))
+
+(ert-deftest jejeje-browse-problem/second-task ()
+  "Opens the correct task URL for the second problem."
+  (jejeje-test--with-browse-problem-env "b"
+    (jejeje-test--with-browse-spy 'browse-url
+      (cl-letf (((symbol-function 'xwidget-webkit-browse-url) nil))
+        (jejeje-browse-problem))
+      (should (equal '("https://atcoder.jp/contests/abc001/tasks/abc001_b")
+                     jejeje-test--browse-calls)))))
+
+(ert-deftest jejeje-browse-problem/fallback-to-contest-url-when-no-task-match ()
+  "Falls back to the contest URL when the directory name matches no task id."
+  (jejeje-test--with-browse-problem-env "z"   ; "z" is not in the tasks list
+    (jejeje-test--with-browse-spy 'browse-url
+      (cl-letf (((symbol-function 'xwidget-webkit-browse-url) nil))
+        (jejeje-browse-problem))
+      (should (equal '("https://atcoder.jp/contests/abc001")
+                     jejeje-test--browse-calls)))))
+
+(ert-deftest jejeje-browse-problem/case-insensitive-task-match ()
+  "Task id matching is case-insensitive (directory \"A\" matches task id \"a\")."
+  (jejeje-test--with-browse-problem-env "A"
+    (jejeje-test--with-browse-spy 'browse-url
+      (cl-letf (((symbol-function 'xwidget-webkit-browse-url) nil))
+        (jejeje-browse-problem))
+      (should (equal '("https://atcoder.jp/contests/abc001/tasks/abc001_a")
+                     jejeje-test--browse-calls)))))
+
+(ert-deftest jejeje-browse-problem/prefers-xwidget-when-available ()
+  "Uses `xwidget-webkit-browse-url' when the function is bound."
+  (jejeje-test--with-browse-problem-env "a"
+    (jejeje-test--with-browse-spy 'xwidget-webkit-browse-url
+      ;; Make xwidget-webkit-browse-url appear to be defined.
+      (cl-letf (((symbol-function 'xwidget-webkit-browse-url)
+                 (lambda (url) (push url jejeje-test--browse-calls))))
+        (jejeje-browse-problem))
+      (should (equal '("https://atcoder.jp/contests/abc001/tasks/abc001_a")
+                     jejeje-test--browse-calls)))))
+
+(ert-deftest jejeje-browse-problem/falls-back-to-browse-url-without-xwidget ()
+  "Falls back to `browse-url' when `xwidget-webkit-browse-url' is unbound."
+  (jejeje-test--with-browse-problem-env "a"
+    (let (called-url)
+      (cl-letf (((symbol-function 'browse-url)
+                 (lambda (url) (setq called-url url))))
+        ;; Temporarily unbind xwidget-webkit-browse-url if it exists.
+        (if (fboundp 'xwidget-webkit-browse-url)
+            (cl-letf (((symbol-function 'xwidget-webkit-browse-url) nil))
+              (jejeje-browse-problem))
+          (jejeje-browse-problem)))
+      (should (equal "https://atcoder.jp/contests/abc001/tasks/abc001_a"
+                     called-url)))))
+
+(ert-deftest jejeje-browse-problem/signals-error-when-no-meta-json ()
+  "Signals `user-error' when no `.je-meta.json' can be found."
+  (jejeje-test--with-temp-dir
+    ;; No .je-meta.json written.
+    (should-error (jejeje-browse-problem) :type 'user-error)))
+
+
 (provide 'jejeje-test)
 ;;; jejeje-test.el ends here
