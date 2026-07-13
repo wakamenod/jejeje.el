@@ -46,6 +46,7 @@
 
 ;;; Code:
 
+(require 'ansi-color)
 (require 'transient)
 (require 'quickrun)
 
@@ -138,6 +139,19 @@ LIMIT is an optional integer cap on the number of contests returned."
             (nreverse results))
         nil))))
 
+(defun jejeje--ansi-filter (proc output)
+  "Process filter for `jejeje--run' that renders ANSI colour codes.
+PROC is the running process; OUTPUT is the raw string chunk received.
+Each chunk is appended to the process buffer and ANSI escape sequences
+are converted to Emacs text properties via `ansi-color-apply-on-region'."
+  (with-current-buffer (process-buffer proc)
+    (let ((inhibit-read-only t)
+          (start (marker-position (process-mark proc))))
+      (goto-char start)
+      (insert output)
+      (ansi-color-apply-on-region start (point))
+      (set-marker (process-mark proc) (point)))))
+
 (defun jejeje--run (args output-buffer &optional sentinel)
   "Start `je' asynchronously with ARGS, streaming output into OUTPUT-BUFFER.
 
@@ -145,14 +159,11 @@ ARGS is a list of strings (subcommand + flags).
 OUTPUT-BUFFER is the buffer that receives stdout and stderr.
 SENTINEL is an optional function called with (process event) when the
 process exits; if nil a default sentinel is used."
-  (let* ((process-environment
-          ;; Disable colour when we are parsing output ourselves (je test).
-          ;; Use NO_COLOR convention; owo-colors respects it.
-          (cons "NO_COLOR=1" process-environment))
-         (proc (make-process
+  (let* ((proc (make-process
                 :name "jejeje"
                 :buffer output-buffer
                 :command (cons jejeje-executable args)
+                :filter #'jejeje--ansi-filter
                 :sentinel (or sentinel #'jejeje--default-sentinel)
                 :stderr output-buffer)))
     proc))
