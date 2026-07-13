@@ -206,5 +206,123 @@ batch/ERT mode."
       (kill-buffer buf))))
 
 
+;;; ─── jejeje--auto-command ────────────────────────────────────────────────────
+
+;; Helpers ─────────────────────────────────────────────────────────────────────
+
+(defmacro jejeje-test--with-mocked-quickrun (key exec &rest body)
+  "Evaluate BODY with quickrun internals mocked for a single-step language.
+
+KEY     - value returned by `quickrun--command-key'
+EXEC    - value of :exec in the command info alist (string or list of strings)
+
+`quickrun--template-argument' is stubbed to return a minimal spec list that
+maps %s → the buffer-file-name and %o → a fixed output path, mirroring the
+real quickrun behaviour closely enough for `jejeje--auto-command' to exercise
+the format-spec expansion path."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'quickrun--command-key)
+               (lambda (_file) ,key))
+              ((symbol-function 'quickrun--command-info)
+               (lambda (_key) `((:exec . ,,exec))))
+              ((symbol-function 'quickrun--template-argument)
+               (lambda (_alist file)
+                 ;; Return the same (%s . FILE) (%o . OUTFILE) pairs that
+                 ;; quickrun itself would build.
+                 (list (cons "%s" file)
+                       (cons "%o" (concat (file-name-sans-extension file)
+                                          ".out"))))))
+     ,@body))
+
+(defmacro jejeje-test--with-file-buffer (filename &rest body)
+  "Evaluate BODY in a temporary buffer whose `buffer-file-name' is FILENAME."
+  (declare (indent 1))
+  `(with-temp-buffer
+     (setq buffer-file-name ,filename)
+     ,@body))
+
+;; Tests — interpreter / single-step exec ─────────────────────────────────────
+
+(ert-deftest jejeje-auto-command/python-no-compile ()
+  "Python (single-step exec) → compile-cmd is nil, run-cmd contains python."
+  (jejeje-test--with-file-buffer "/tmp/sol.py"
+    (jejeje-test--with-mocked-quickrun "python" "python %s"
+      (let ((result (jejeje--auto-command)))
+        (should (null (car result)))
+        (should (string-match-p "python" (cdr result)))
+        (should (string-match-p "sol\\.py" (cdr result)))))))
+
+(ert-deftest jejeje-auto-command/ruby-no-compile ()
+  "Ruby (single-step exec) → compile-cmd is nil, run-cmd contains ruby."
+  (jejeje-test--with-file-buffer "/tmp/sol.rb"
+    (jejeje-test--with-mocked-quickrun "ruby" "ruby %s"
+      (let ((result (jejeje--auto-command)))
+        (should (null (car result)))
+        (should (string-match-p "ruby" (cdr result)))))))
+
+(ert-deftest jejeje-auto-command/run-cmd-expands-source-file ()
+  "The %s placeholder in exec is expanded to the actual file path."
+  (jejeje-test--with-file-buffer "/tmp/foo.py"
+    (jejeje-test--with-mocked-quickrun "python" "python %s"
+      (let ((result (jejeje--auto-command)))
+        (should (equal "python /tmp/foo.py" (cdr result)))))))
+
+;; Tests — compiler / multi-step exec ─────────────────────────────────────────
+
+(ert-deftest jejeje-auto-command/c++-has-compile-step ()
+  "C++ (multi-step exec) → compile-cmd is a non-empty string."
+  (jejeje-test--with-file-buffer "/tmp/sol.cpp"
+    (jejeje-test--with-mocked-quickrun "c++" '("g++ -o %o %s" "%o")
+      (let ((result (jejeje--auto-command)))
+        (should (stringp (car result)))
+        (should (not (string-empty-p (car result))))))))
+
+(ert-deftest jejeje-auto-command/c++-run-cmd-is-binary ()
+  "C++ run-cmd is the expanded output binary path, not the source file."
+  (jejeje-test--with-file-buffer "/tmp/sol.cpp"
+    (jejeje-test--with-mocked-quickrun "c++" '("g++ -o %o %s" "%o")
+      (let* ((result  (jejeje--auto-command))
+             (run-cmd (cdr result)))
+        ;; run-cmd must be the %o expansion, NOT the .cpp file
+        (should (string-match-p "\\.out$" run-cmd))
+        (should (not (string-match-p "\\.cpp" run-cmd)))))))
+
+(ert-deftest jejeje-auto-command/c++-compile-cmd-contains-source ()
+  "C++ compile-cmd includes the source file path."
+  (jejeje-test--with-file-buffer "/tmp/sol.cpp"
+    (jejeje-test--with-mocked-quickrun "c++" '("g++ -o %o %s" "%o")
+      (let ((compile-cmd (car (jejeje--auto-command))))
+        (should (string-match-p "sol\\.cpp" compile-cmd))))))
+
+(ert-deftest jejeje-auto-command/three-step-exec-last-is-runner ()
+  "When exec has three steps the last one becomes run-cmd."
+  ;; E.g. javac → jar → java  (hypothetical)
+  (jejeje-test--with-file-buffer "/tmp/sol.java"
+    (jejeje-test--with-mocked-quickrun "java" '("javac %s" "jar cf %o.jar %o" "java %o")
+      (let* ((result  (jejeje--auto-command))
+             (run-cmd (cdr result))
+             (compile (car result)))
+        (should (string-match-p "java " run-cmd))
+        ;; compile-cmd must include both first two steps joined by " && "
+        (should (string-match-p "&&" compile))
+        (should (string-match-p "javac" compile))
+        (should (string-match-p "jar" compile))))))
+
+;; Tests — error conditions ────────────────────────────────────────────────────
+
+(ert-deftest jejeje-auto-command/no-file-errors ()
+  "Signals `user-error' when the current buffer has no associated file."
+  (with-temp-buffer
+    ;; buffer-file-name is nil by default in temp buffers
+    (should-error (jejeje--auto-command) :type 'user-error)))
+
+(ert-deftest jejeje-auto-command/unknown-extension-errors ()
+  "Signals `user-error' when quickrun has no mapping for the file."
+  (jejeje-test--with-file-buffer "/tmp/sol.unknownlang"
+    (cl-letf (((symbol-function 'quickrun--command-key)
+               (lambda (_file) nil)))  ; nil = no mapping
+      (should-error (jejeje--auto-command) :type 'user-error))))
+
+
 (provide 'jejeje-test)
 ;;; jejeje-test.el ends here

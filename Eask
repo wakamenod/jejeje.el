@@ -16,3 +16,4 @@
 
 (depends-on "emacs" "28.1")
 (depends-on "transient" "0.4.0")
+(depends-on "quickrun" "2.3")

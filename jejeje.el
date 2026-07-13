@@ -4,7 +4,7 @@
 
 ;; Author: jun
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "28.1") (transient "0.4.0"))
+;; Package-Requires: ((emacs "28.1") (transient "0.4.0") (quickrun "2.3"))
 ;; Keywords: competitive-programming, tools, processes
 ;; URL: https://github.com/jun/jejeje.el
 
@@ -47,6 +47,7 @@
 ;;; Code:
 
 (require 'transient)
+(require 'quickrun)
 
 
 ;;; ─── Customisation ────────────────────────────────────────────────────────────
@@ -63,10 +64,14 @@ When set to a bare name such as \"je\", the executable is looked up via
   :type 'string
   :group 'jejeje)
 
-(defcustom jejeje-test-command "./a.out"
-  "Default shell command passed to `je test -c'.
-Override this per-project via directory-local variables."
-  :type 'string
+(defcustom jejeje-test-command nil
+  "Shell command passed to `je test -c', or nil for automatic detection.
+When nil (default), `jejeje-test' uses `jejeje--auto-command' to derive
+the run command from the current buffer's file extension via `quickrun'.
+Set to a non-nil string to pin a specific command for the current project
+\(e.g. via directory-local variables in `.dir-locals.el')."
+  :type '(choice (const :tag "Auto-detect via quickrun" nil)
+                 (string :tag "Fixed command"))
   :group 'jejeje)
 
 (defcustom jejeje-test-tle 2.0
@@ -185,6 +190,40 @@ Returns a string such as \"3 / 4 passed\" or \"All 4 tests passed!\"."
        "je test complete"))))
 
 
+(defun jejeje--auto-command ()
+  "Derive the test-run command for the current buffer via `quickrun'.
+Returns a cons cell (COMPILE-CMD . RUN-CMD) where COMPILE-CMD is a shell
+command string to build the binary first (nil when not needed), and
+RUN-CMD is the string passed to `je test --command'.
+
+If quickrun cannot find a mapping for the current file, signals a
+`user-error' asking the user to set `jejeje-test-command' manually."
+  (unless buffer-file-name
+          (user-error "Jejeje: current buffer has no associated file"))
+  (let* ((file    buffer-file-name)
+         (key     (quickrun--command-key file))
+         (_ (unless key
+              (user-error "Jejeje: quickrun has no mapping for %s; \
+set `jejeje-test-command' manually"
+                          (file-name-extension file t))))
+         (alist   (quickrun--command-info key))
+         (spec    (mapcar (lambda (elm)
+                            (cons (string-to-char (substring (car elm) 1))
+                                  (cdr elm)))
+                          (quickrun--template-argument alist file)))
+         (exec    (or (alist-get :exec alist)
+                      (alist-get :exec quickrun--default-tmpl-alist))))
+    (if (consp exec)
+        ;; Multi-step: (compile-step … run-step)  — last element is the runner
+        (let* ((steps      (mapcar (lambda (s) (format-spec s spec)) exec))
+               (compile-steps (butlast steps))
+               (run-cmd       (car (last steps)))
+               (compile-cmd   (when compile-steps
+                                (mapconcat #'identity compile-steps " && "))))
+          (cons compile-cmd run-cmd))
+      ;; Single step: interpreter-style
+      (cons nil (format-spec exec spec)))))
+
 ;;; ─── Major mode for test results ──────────────────────────────────────────────
 
 (defvar je-test-mode-font-lock-keywords
@@ -265,16 +304,44 @@ from the fetched list.  QUERY becomes the selected contest ID."
 ;;;###autoload
 (defun jejeje-test (&optional command)
   "Run `je test' against the solution COMMAND.
-COMMAND defaults to `jejeje-test-command'.
+
+When called interactively without a prefix argument and `jejeje-test-command'
+is nil (the default), the run command is derived automatically from the
+current buffer's file type via `quickrun' — no prompt is shown.
+
+With a prefix argument (\\[universal-argument]), or when `jejeje-test-command'
+is set to a non-nil string, a `read-string' prompt is shown so you can
+override the command for this invocation.
+
 Results are shown in a `je-test-mode' buffer; a summary is also
 displayed in the minibuffer when the process finishes."
   (interactive
-   (list (read-string
-          (format "Command (default: %s): " jejeje-test-command)
-          nil nil jejeje-test-command)))
-  (let* ((cmd (or (and (not (string-empty-p command)) command)
-                  jejeje-test-command))
+   (list
+    (if (or current-prefix-arg jejeje-test-command)
+        ;; Manual override: show a prompt (C-u always forces this path too)
+        (let ((default (or jejeje-test-command
+                           (cdr (jejeje--auto-command)))))
+          (read-string
+           (format "Command (default: %s): " default)
+           nil nil default))
+      ;; Auto-detect: resolve silently, no prompt
+      nil)))
+  (let* ((auto   (unless command (jejeje--auto-command)))
+         (cmd    (or (and (stringp command) (not (string-empty-p command)) command)
+                     (cdr auto)
+                     jejeje-test-command))
+         (compile-cmd (car auto))
          (buf (jejeje--get-output-buffer)))
+    (unless cmd
+      (user-error "Jejeje: could not determine run command; \
+set `jejeje-test-command' or install quickrun"))
+    ;; Run compile step synchronously when needed (e.g. C++, Java, Rust)
+    (when compile-cmd
+      (message "Jejeje: compiling with `%s' …" compile-cmd)
+      (let ((exit (shell-command compile-cmd)))
+        (unless (= 0 exit)
+          (user-error "Jejeje: compilation failed (exit %d) — check *Shell Command Output*"
+                      exit))))
     (with-current-buffer buf
       (je-test-mode))
     (display-buffer buf)

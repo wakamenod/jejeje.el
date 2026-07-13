@@ -13,7 +13,7 @@ Supported online judges via the ~je~ tool:
 * Features
 
 - *~jejeje-prepare~*: Interactively select a judge and contest from a fetched list, then fetch problem samples.
-- *~jejeje-test~*: Run test cases against your solution with syntax-highlighted results (~je-test-mode~).
+- *~jejeje-test~*: Run test cases against your solution with syntax-highlighted results (~je-test-mode~).  The run command is derived automatically from the current buffer's file type via [[https://github.com/emacsorphanage/quickrun][quickrun]] (no prompt needed).  Use ~C-u~ to override the command for a single invocation.
 - *~jejeje-info~*: Display contest metadata from ~.je-meta.json~.
 - *~jejeje-menu~*: A convenient, interactive [[https://github.com/magit/transient][Transient]] popup menu for all commands.
 
@@ -22,6 +22,7 @@ Supported online judges via the ~je~ tool:
 - *Emacs*: version 28.1 or higher.
 - *~je~ CLI tool*: Must be installed and accessible via your ~exec-path~ or ~PATH~.
 - *transient*: version 0.4.0 or higher (automatically resolved via package managers).
+- *quickrun*: version 2.3 or higher (automatically resolved via package managers).  Used to detect the compile/run command from the buffer's file type.
 
 * Installation
 
@@ -81,13 +82,28 @@ If you use ~el-get~ as the package backend for ~leaf~:
 You can customize the behavior of ~jejeje.el~ using ~M-x customize-group RET jejeje~ or by setting variables directly:
 
 #+begin_src elisp
-(setq jejeje-executable "je")          ; Path or name of the `je` executable
-(setq jejeje-test-command "./a.out")   ; Default shell command passed to `je test`
-(setq jejeje-test-tle 2.0)             ; Default time-limit in seconds
-(setq jejeje-buffer-name "*jejeje*")   ; Name of the output buffer
+(setq jejeje-executable "je")     ; Path or name of the `je` executable
+(setq jejeje-test-command nil)    ; nil = auto-detect via quickrun (default)
+                                  ; Set to e.g. "./a.out" to pin a fixed command
+(setq jejeje-test-tle 2.0)        ; Default time-limit in seconds
+(setq jejeje-buffer-name "*jejeje*") ; Name of the output buffer
 #+end_src
 
-/Tip: You can override ~jejeje-test-command~ per-project using directory-local variables (~.dir-locals.el~)./
+*** ~jejeje-test-command~ in detail
+
+| Value | Behaviour |
+|-------+-----------|
+| ~nil~ (default) | ~jejeje-test~ calls ~quickrun~ internally to detect the language from the buffer's file extension and derives compile + run commands automatically — *no prompt shown*. |
+| A string (e.g. ~"./a.out"~ ) | The string is used as the default in a ~read-string~ prompt, preserving the previous manual-entry behaviour. |
+
+/Tip: You can pin the command per-project using directory-local variables (~.dir-locals.el~):/
+
+#+begin_src elisp
+;; .dir-locals.el
+((nil . ((jejeje-test-command . "./a.out"))))
+#+end_src
+
+~C-u M-x jejeje-test~ always opens a prompt regardless of the variable's value, with the auto-detected command pre-filled as the default.
 
 * Usage
 
