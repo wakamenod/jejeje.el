@@ -460,11 +460,21 @@ notice is shown in the minibuffer."
                   (progn
                     (message "jejeje: task id %S not found in contest — opening contest page"
                              task-id)
-                    contest-url)))
-         (open-fn (if (fboundp 'xwidget-webkit-browse-url)
-                      #'xwidget-webkit-browse-url
-                    #'browse-url)))
-    (funcall open-fn url)))
+                    contest-url))))
+    (if (fboundp 'xwidget-webkit-browse-url)
+        ;; xwidget が使える場合: 既存の xwidget ウィンドウを再利用、
+        ;; なければ右側に分割して開く
+        (let* ((existing-win
+                (seq-find (lambda (w)
+                            (with-current-buffer (window-buffer w)
+                              (derived-mode-p 'xwidget-webkit-mode)))
+                          (window-list)))
+               (target-win (or existing-win
+                               (split-window-right))))
+          (select-window target-win)
+          (xwidget-webkit-browse-url url))
+      ;; xwidget が使えない場合: 外部ブラウザに委譲
+      (browse-url url))))
 
 
 ;;; ─── Transient menu ───────────────────────────────────────────────────────────
