@@ -9,7 +9,7 @@
 
 (package-file "jejeje.el")
 
-(script "test" "eask compile")
+(script "test" "eask compile && eask test ert test/*.el")
 
 (source "gnu")
 (source "melpa")

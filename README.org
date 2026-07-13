@@ -111,6 +111,48 @@ Inside ~jejeje-map~, the following default single-key bindings are available:
 - ~S~ : ~jejeje-config-set~
 - ~m~ : ~jejeje-menu~
 
+* Development
+
+** Running Tests
+
+The test suite uses [[https://www.gnu.org/software/emacs/manual/html_node/ert/][ERT]] (Emacs Lisp Regression Testing) and is managed via [[https://emacs-eask.github.io/][Eask]].
+
+*** Prerequisites
+
+Install Eask if you have not already:
+
+#+begin_src sh
+npm install -g @emacs-eask/cli
+#+end_src
+
+*** Install dependencies
+
+#+begin_src sh
+eask install-deps
+#+end_src
+
+*** Run all tests
+
+Byte-compiles the package first, then runs the full ERT suite:
+
+#+begin_src sh
+eask run test
+#+end_src
+
+*** Run ERT only (skip byte-compilation)
+
+#+begin_src sh
+eask test ert test/*.el
+#+end_src
+
+*** Run tests interactively in Emacs
+
+Open ~test/jejeje-test.el~ in Emacs, then:
+
+#+begin_src text
+M-x ert RET t RET
+#+end_src
+
 * License
 
 GPL-3.0-or-later
