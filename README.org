@@ -1,0 +1,118 @@
+#+TITLE: jejeje.el
+
+Emacs interface for the [[https://github.com/wakamenod/jejeje][jejeje]] competitive programming CLI tool.
+
+~jejeje.el~ provides a seamless Emacs integration for the ~je~ command-line tool, a competitive programming helper written in Rust. It allows you to fetch problem samples, run tests against your solutions, and manage configurations directly within Emacs.
+
+Supported online judges via the ~je~ tool:
+- AtCoder
+- Codeforces
+- yukicoder
+- AOJ (Aizu Online Judge)
+
+* Features
+
+- *~jejeje-prepare~*: Fetch contest/problem samples from a URL or ID.
+- *~jejeje-test~*: Run test cases against your solution with syntax-highlighted results (~je-test-mode~).
+- *~jejeje-info~*: Display contest metadata from ~.je-meta.json~.
+- *~jejeje-contests~*: Browse available contest lists per judge.
+- *~jejeje-config-get~* / *~set~*: Manage ~je~ CLI configuration values.
+- *~jejeje-menu~*: A convenient, interactive [[https://github.com/magit/transient][Transient]] popup menu for all commands.
+
+* Prerequisites
+
+- *Emacs*: version 28.1 or higher.
+- *~je~ CLI tool*: Must be installed and accessible via your ~exec-path~ or ~PATH~.
+- *transient*: version 0.4.0 or higher (automatically resolved via package managers).
+
+* Installation
+
+Since ~jejeje.el~ is not hosted on official package repositories like MELPA yet, you can install it directly from GitHub using modern package managers or setup macros.
+
+** Using ~use-package~
+
+*** Emacs 29+ (Built-in ~package-vc~)
+If you are using Emacs 29 or later, you can leverage the built-in ~package-vc~ support within ~use-package~:
+
+#+begin_src elisp
+(use-package jejeje
+  :vc (:url "https://github.com/wakamenod/jejeje.el")
+  :bind (("C-c j" . jejeje-menu)))
+#+end_src
+
+*** With ~straight.el~
+If your ~use-package~ is backed by ~straight.el~:
+
+#+begin_src elisp
+(use-package jejeje
+  :straight (jejeje :type git :host github :repo "wakamenod/jejeje.el")
+  :bind (("C-c j" . jejeje-menu)))
+#+end_src
+
+** Using ~leaf~
+
+*** Emacs 29+ (Built-in ~package-vc~)
+Recommended for Emacs 29+ without external package manager extensions:
+
+#+begin_src elisp
+(leaf jejeje
+  :vc (:url "https://github.com/wakamenod/jejeje.el")
+  :bind (("C-c j" . jejeje-menu)))
+#+end_src
+
+*** With ~straight.el~
+If you use ~straight.el~ as the package backend for ~leaf~:
+
+#+begin_src elisp
+(leaf jejeje
+  :straight (jejeje :type git :host github :repo "wakamenod/jejeje.el")
+  :bind (("C-c j" . jejeje-menu)))
+#+end_src
+
+*** With ~el-get~
+If you use ~el-get~ as the package backend for ~leaf~:
+
+#+begin_src elisp
+(leaf jejeje
+  :el-get (jejeje :type github :pkgname "wakamenod/jejeje.el")
+  :bind (("C-c j" . jejeje-menu)))
+#+end_src
+
+* Configuration
+
+You can customize the behavior of ~jejeje.el~ using ~M-x customize-group RET jejeje~ or by setting variables directly:
+
+#+begin_src elisp
+(setq jejeje-executable "je")          ; Path or name of the `je` executable
+(setq jejeje-test-command "./a.out")   ; Default shell command passed to `je test`
+(setq jejeje-test-tle 2.0)             ; Default time-limit in seconds
+(setq jejeje-buffer-name "*jejeje*")   ; Name of the output buffer
+#+end_src
+
+/Tip: You can override ~jejeje-test-command~ per-project using directory-local variables (~.dir-locals.el~)./
+
+* Usage
+
+** Transient Menu (Recommended)
+Launch the interactive popup menu containing all available commands:
+~M-x jejeje-menu~ (or your bound key ~C-c j~).
+
+** Keymap Alternative
+Instead of a single command, you can also bind the entire prefix map ~jejeje-map~ to a prefix key:
+
+#+begin_src elisp
+(global-set-key (kbd "C-c j") jejeje-map)
+#+end_src
+
+Inside ~jejeje-map~, the following default single-key bindings are available:
+- ~p~ : ~jejeje-prepare~
+- ~t~ : ~jejeje-test~
+- ~i~ : ~jejeje-info~
+- ~l~ : ~jejeje-contests~
+- ~G~ : ~jejeje-config-get~
+- ~S~ : ~jejeje-config-set~
+- ~m~ : ~jejeje-menu~
+
+* License
+
+GPL-3.0-or-later
