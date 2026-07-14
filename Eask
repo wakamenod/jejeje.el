@@ -2,7 +2,7 @@
 
 (package "jejeje"
          "0.1.0"
-         "Emacs interface for the jejeje competitive programming CLI tool")
+         "Emacs interface for the jejeje CLI tool")
 
 (website-url "https://github.com/jun/jejeje.el")
 (keywords "competitive-programming" "tools" "processes")

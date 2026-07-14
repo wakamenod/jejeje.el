@@ -1,4 +1,4 @@
-;;; jejeje.el --- Emacs interface for the jejeje competitive programming CLI tool  -*- lexical-binding: t; -*-
+;;; jejeje.el --- Emacs interface for the jejeje CLI tool  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2025  jun
 
@@ -62,7 +62,7 @@
 (defcustom jejeje-executable "je"
   "Path to (or name of) the `je' executable.
 When set to a bare name such as \"je\", the executable is looked up via
-`exec-path'.  Set to an absolute path when the binary is not on PATH."
+variable `exec-path'.  Set to an absolute path when the binary is not on PATH."
   :type 'string
   :group 'jejeje)
 
@@ -268,7 +268,7 @@ PROCESS is the finished process; EVENT is a string describing the change."
         (insert (propertize
                  (format "[je exited — %s]" (string-trim event))
                  'face 'shadow))))
-    (message "je: %s" (string-trim event))))
+    (message "Je: %s" (string-trim event))))
 
 (defun jejeje--parse-test-summary (buf)
   "Parse the output in BUF and return a summary string.
@@ -349,7 +349,7 @@ Signals `user-error' if the file cannot be read or parsed."
         (insert-file-contents path)
         (json-parse-string (buffer-string) :object-type 'hash-table :array-type 'array))
     (error
-     (user-error "jejeje: failed to parse %s: %s" path (error-message-string err)))))
+     (user-error "Jejeje: failed to parse %s: %s" path (error-message-string err)))))
 
 (defun jejeje--current-task-id ()
   "Return the task ID inferred from the current `default-directory'.
@@ -364,6 +364,27 @@ Uses `json-encode' which handles all necessary escape sequences:
 backslashes, double quotes, newlines, and other control characters.
 The result is safe to interpolate directly into a JS expression."
   (json-encode str))
+
+
+;;; ─── Template directory ──────────────────────────────────────────────────────
+
+(defun jejeje--get-template-dir ()
+  "Return the template directory configured via `je config template_dir'.
+Runs `je config template_dir' synchronously using `jejeje-executable' and
+returns the trimmed output string.
+Signals `user-error' when the command fails or returns an empty value."
+  (let* ((result
+          (with-temp-buffer
+            (let ((exit-code
+                   (call-process jejeje-executable nil t nil
+                                 "config" "template_dir")))
+              (if (= 0 exit-code)
+                  (string-trim (buffer-string))
+                (user-error "Jejeje: `je config template_dir' failed (exit %d)"
+                            exit-code))))))
+    (when (string-empty-p result)
+      (user-error "Jejeje: template_dir is not set — run `je config template_dir <path>'"))
+    result))
 
 
 ;;; ─── Submit: judge backends ───────────────────────────────────────────────────
@@ -431,7 +452,7 @@ first entry whose URL regexp matches URL."
 
 ;;; ─── Major mode for test results ──────────────────────────────────────────────
 
-(defvar je-test-mode-font-lock-keywords
+(defvar jejeje-test-mode-font-lock-keywords
   `(;; "All N tests passed!" — bold green
     (,(rx bol "All " (one-or-more digit) " tests passed!" eol)
      . 'success)
@@ -452,12 +473,12 @@ first entry whose URL regexp matches URL."
     ;; Section headers in WA diff blocks
     (,(rx bol "  " (or "Input" "Expected" "Actual") " :")
      . 'font-lock-comment-face))
-  "Font-lock keywords for `je-test-mode'.")
+  "Font-lock keywords for `jejeje-test-mode'.")
 
-(define-derived-mode je-test-mode special-mode "je-test"
+(define-derived-mode jejeje-test-mode special-mode "je-test"
   "Major mode for displaying `je test' results.
 Provides syntax highlighting for AC, WA, TLE, RE, and SKIP verdicts."
-  (setq-local font-lock-defaults '(je-test-mode-font-lock-keywords t))
+  (setq-local font-lock-defaults '(jejeje-test-mode-font-lock-keywords t))
   (font-lock-mode 1)
   (read-only-mode 1))
 
@@ -473,7 +494,7 @@ from the fetched list.  QUERY becomes the selected contest ID."
    (let* ((judge (completing-read "Judge: "
                                   '("atcoder" "codeforces" "yukicoder" "aoj")
                                   nil t))
-          (_ (message "jejeje: fetching %s contests …" judge))
+          (_ (message "Jejeje: fetching %s contests …" judge))
           (candidates (jejeje--fetch-contests judge))
           (query
            (if candidates
@@ -484,14 +505,14 @@ from the fetched list.  QUERY becomes the selected contest ID."
                  (or id choice))
              ;; Fallback: manual entry when fetch fails
              (progn
-               (message "jejeje: failed to fetch contest list — enter ID/URL manually")
+               (message "Jejeje: failed to fetch contest list — enter ID/URL manually")
                (read-string "je prepare — URL / ID / query: ")))))
      (list query)))
   (let ((buf (jejeje--get-output-buffer)))
     (with-current-buffer buf
       (special-mode))
     (display-buffer buf)
-    (message "jejeje: preparing %s …" query)
+    (message "Jejeje: preparing %s …" query)
     (jejeje--run
      (list "prepare" query)
      buf
@@ -503,8 +524,8 @@ from the fetched list.  QUERY becomes the selected contest ID."
              (unless (bolp) (insert "\n"))
              (insert (propertize "[je prepare done]" 'face 'shadow))))
          (if (= 0 (process-exit-status proc))
-             (message "jejeje: prepare complete for %s" query)
-           (message "jejeje: prepare failed — see %s" jejeje-buffer-name)))))))
+             (message "Jejeje: prepare complete for %s" query)
+           (message "Jejeje: prepare failed — see %s" jejeje-buffer-name)))))))
 
 ;;;###autoload
 (defun jejeje-test (&optional command display-method)
@@ -525,7 +546,7 @@ How the result buffer is displayed (in order of precedence):
    show a floating child-frame.
 4. Otherwise fall back to the standard `display-buffer' mechanism.
 
-Results are shown in a `je-test-mode' buffer; a summary is also
+Results are shown in a `jejeje-test-mode' buffer; a summary is also
 displayed in the minibuffer when the process finishes."
   (interactive
    (if current-prefix-arg
@@ -560,7 +581,7 @@ set `jejeje-test-command' or install quickrun"))
           (user-error "Jejeje: compilation failed (exit %d) — check *Shell Command Output*"
                       exit))))
     (with-current-buffer buf
-      (je-test-mode))
+      (jejeje-test-mode))
     ;; ── Display logic ───────────────────────────────────────────────────────
     ;; Priority:
     ;;  1. Explicitly supplied DISPLAY-METHOD (from C-u prompt).
@@ -578,7 +599,7 @@ set `jejeje-test-command' or install quickrun"))
       (unless (eq effective-method 'existing)
         (jejeje--show-output-buffer buf effective-method)))
     ;; ────────────────────────────────────────────────────────────────────────
-    (message "jejeje: running tests with `%s' …" cmd)
+    (message "Jejeje: running tests with `%s' …" cmd)
     (jejeje--run
      (list "test"
            "--command" cmd
@@ -593,7 +614,7 @@ set `jejeje-test-command' or install quickrun"))
                (goto-char (point-max))
                (unless (bolp) (insert "\n"))
                (insert (propertize (format "[%s]" summary) 'face 'shadow))))
-           (message "jejeje: %s" summary)))))))
+           (message "Jejeje: %s" summary)))))))
 
 ;;;###autoload
 (defun jejeje-info ()
@@ -610,8 +631,8 @@ Walks up from `default-directory' to find `.je-meta.json'."
      (lambda (proc event)
        (when (string-match-p "finished\\|exited" event)
          (if (= 0 (process-exit-status proc))
-             (message "jejeje: info loaded")
-           (message "jejeje: `je info' failed — no .je-meta.json found? See %s"
+             (message "Jejeje: info loaded")
+           (message "Jejeje: `je info' failed — no .je-meta.json found? See %s"
                     jejeje-buffer-name)))))))
 
 
@@ -621,13 +642,13 @@ Searches all windows on the current frame for one whose buffer is in
 `xwidget-webkit-mode'.  Signals `user-error' if none is found or if
 xwidgets are not compiled into this Emacs."
   (unless (fboundp 'xwidget-webkit-current-session)
-    (user-error "jejeje: xwidgets not available (Emacs must be built with --with-xwidgets)"))
+    (user-error "Jejeje: xwidgets not available (Emacs must be built with --with-xwidgets)"))
   (let ((win (seq-find (lambda (w)
                          (with-current-buffer (window-buffer w)
                            (derived-mode-p 'xwidget-webkit-mode)))
                        (window-list))))
     (unless win
-      (user-error "jejeje: no xwidget window found — run M-x jejeje-browse-problem first"))
+      (user-error "Jejeje: no xwidget window found — run M-x jejeje-browse-problem first"))
     (with-current-buffer (window-buffer win)
       (xwidget-webkit-current-session))))
 
@@ -644,7 +665,7 @@ If no matching task is found the contest top-level URL is opened and a
 notice is shown in the minibuffer."
   (interactive)
   (let* ((meta-path (or (jejeje--find-meta-json)
-                        (user-error "jejeje: no .je-meta.json found in %s or any parent directory"
+                        (user-error "Jejeje: no .je-meta.json found in %s or any parent directory"
                                     default-directory)))
          (meta      (jejeje--read-meta-json meta-path))
          (tasks     (gethash "tasks" meta))
@@ -660,7 +681,7 @@ notice is shown in the minibuffer."
          (contest-url (gethash "url" meta))
          (url (or matched-url
                   (progn
-                    (message "jejeje: task id %S not found in contest — opening contest page"
+                    (message "Jejeje: task id %S not found in contest — opening contest page"
                              task-id)
                     contest-url))))
     (if (fboundp 'xwidget-webkit-browse-url)
@@ -702,7 +723,7 @@ To add support for another judge, push a new entry onto
 `jejeje--submit-backend-alist' before calling this command."
   (interactive)
   (unless (fboundp 'xwidget-webkit-execute-script)
-    (user-error "jejeje: xwidgets not available (Emacs must be built with --with-xwidgets)"))
+    (user-error "Jejeje: xwidgets not available (Emacs must be built with --with-xwidgets)"))
   (let* ((source-code (buffer-string))
          (file-ext    (when buffer-file-name
                         (file-name-extension buffer-file-name)))
@@ -711,7 +732,7 @@ To add support for another judge, push a new entry onto
          (backend     (jejeje--detect-submit-backend url)))
     (unless backend
       (user-error
-       "jejeje: no submit backend for current page (%s) — supported judges: %s"
+       "Jejeje: no submit backend for current page (%s) — supported judges: %s"
        url
        (mapconcat #'car jejeje--submit-backend-alist ", ")))
     ;; Fetch language options from the page asynchronously via JS callback.
@@ -727,7 +748,7 @@ To add support for another judge, push a new entry onto
                  (error nil)))
               (_ (unless raw
                    (user-error
-                    (concat "jejeje: failed to retrieve language list — "
+                    (concat "Jejeje: failed to retrieve language list — "
                             "make sure the submit page is open in the xwidget window"))))
               ;; Build (display-text . option-value) alist for completing-read.
               (candidates
@@ -754,7 +775,25 @@ To add support for another judge, push a new entry onto
          (xwidget-webkit-execute-script
           session
           (funcall (plist-get backend :set-code-js) source-code))
-         (message "jejeje: code and language set — please press the submit button"))))))
+         (message "Jejeje: code and language set — please press the submit button"))))))
+
+
+;;;###autoload
+(defun jejeje-template ()
+  "Open the template directory configured via `je config template_dir'.
+
+If the current buffer is visiting a file and a file with the same base name
+exists in the template directory, open that file directly with `find-file'.
+Otherwise open the template directory itself with `dired'."
+  (interactive)
+  (let* ((template-dir (jejeje--get-template-dir))
+         (base-name    (and buffer-file-name
+                            (file-name-nondirectory buffer-file-name)))
+         (candidate    (and base-name
+                            (expand-file-name base-name template-dir))))
+    (if (and candidate (file-regular-p candidate))
+        (find-file candidate)
+      (dired template-dir))))
 
 
 ;;; ─── Transient menu ───────────────────────────────────────────────────────────
@@ -766,7 +805,8 @@ To add support for another judge, push a new entry onto
     ("p" "Prepare samples"  jejeje-prepare)
     ("i" "Contest info"     jejeje-info)
     ("w" "Browse problem"   jejeje-browse-problem)
-    ("s" "Submit problem"   jejeje-submit-problem)]
+    ("s" "Submit problem"   jejeje-submit-problem)
+    ("T" "Open template"    jejeje-template)]
    ["Test"
     ("t" "Run tests"        jejeje-test)]
    ])
@@ -782,6 +822,7 @@ To add support for another judge, push a new entry onto
     (define-key map (kbd "i") #'jejeje-info)
     (define-key map (kbd "w") #'jejeje-browse-problem)
     (define-key map (kbd "s") #'jejeje-submit-problem)
+    (define-key map (kbd "T") #'jejeje-template)
     (define-key map (kbd "m") #'jejeje-menu)
     map)
   "Prefix key map for jejeje commands.

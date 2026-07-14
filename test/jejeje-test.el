@@ -1223,5 +1223,62 @@ Inside BODY the following dynamic variables are available:
     (should (not (string-prefix-p "." (car entry))))))
 
 
+;;; ─── jejeje-template ─────────────────────────────────────────────────────────
+
+;; Helper: mock `jejeje--get-template-dir' to return a fixed path.
+(defmacro jejeje-test--with-template-dir (dir &rest body)
+  "Evaluate BODY with `jejeje--get-template-dir' stubbed to return DIR."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'jejeje--get-template-dir)
+              (lambda () ,dir)))
+     ,@body))
+
+(ert-deftest jejeje-template/signals-error-when-template-dir-empty ()
+  "Signals `user-error' when `je config template_dir' is not configured."
+  (cl-letf (((symbol-function 'jejeje--get-template-dir)
+             (lambda ()
+               (user-error "jejeje: template_dir is not set — run `je config template_dir <path>'"))))
+    (should-error (jejeje-template) :type 'user-error)))
+
+(ert-deftest jejeje-template/opens-file-when-same-name-exists ()
+  "Calls `find-file' with the template file when a same-named file exists."
+  (jejeje-test--with-temp-dir
+    (let* ((tpl-file (expand-file-name "sol.cpp" default-directory)))
+      (jejeje-test--write-file tpl-file "// template")
+      (jejeje-test--with-template-dir default-directory
+        (let (opened-path)
+          (cl-letf (((symbol-function 'find-file)
+                     (lambda (path) (setq opened-path path))))
+            (jejeje-test--with-file-buffer "/contest/abc001/a/sol.cpp"
+              (jejeje-template)))
+          (should (equal tpl-file opened-path)))))))
+
+(ert-deftest jejeje-template/opens-dired-when-no-same-name-file ()
+  "Calls `dired' on the template directory when no same-named file exists."
+  (jejeje-test--with-temp-dir
+    (let ((tpl-dir default-directory))
+      ;; No sol.py in tpl-dir
+      (jejeje-test--with-template-dir tpl-dir
+        (let (dired-path)
+          (cl-letf (((symbol-function 'dired)
+                     (lambda (path) (setq dired-path path))))
+            (jejeje-test--with-file-buffer "/contest/abc001/a/sol.py"
+              (jejeje-template)))
+          (should (equal tpl-dir dired-path)))))))
+
+(ert-deftest jejeje-template/opens-dired-when-buffer-has-no-file ()
+  "Calls `dired' when the current buffer is not visiting a file."
+  (jejeje-test--with-temp-dir
+    (let ((tpl-dir default-directory))
+      (jejeje-test--with-template-dir tpl-dir
+        (let (dired-path)
+          (cl-letf (((symbol-function 'dired)
+                     (lambda (path) (setq dired-path path))))
+            ;; with-temp-buffer leaves buffer-file-name as nil
+            (with-temp-buffer
+              (jejeje-template)))
+          (should (equal tpl-dir dired-path)))))))
+
+
 (provide 'jejeje-test)
 ;;; jejeje-test.el ends here
