@@ -1189,6 +1189,30 @@ Inside BODY the following dynamic variables are available:
     (jejeje-submit-problem)
     (should (= 3 (length jejeje-test--js-calls)))))
 
+(ert-deftest jejeje-submit-inject/with-problem-index-makes-four-js-calls ()
+  "When problem-index is supplied, four JS calls are made (set-problem added)."
+  (let ((fake-session (list 'fake-session))
+        js-calls)
+    (cl-letf (((symbol-function 'xwidget-webkit-execute-script)
+               (lambda (_s js &optional cb)
+                 (push js js-calls)
+                 (when cb
+                   (funcall cb
+                            (json-encode
+                             '(((value . "54") (text . "GNU G++17 7.3.0"))))))))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "GNU G++17 7.3.0"))
+              ((symbol-function 'message) #'ignore))
+      (let ((backend (jejeje--detect-submit-backend
+                      "https://codeforces.com/contest/1352/submit")))
+        (with-temp-buffer
+          (insert "int main(){}")
+          (jejeje--submit-inject fake-session backend (buffer-string) nil "A")))
+      ;; 4 calls: set-problem, get-languages, set-language, set-code
+      (should (= 4 (length js-calls)))
+      (should (cl-some (lambda (js) (string-match-p "submittedProblemIndex" js))
+                       js-calls)))))
+
 
 ;;; ─── jejeje-language-alist default values ────────────────────────────────────
 
@@ -1359,6 +1383,65 @@ Inside BODY the following dynamic variables are available:
   (let* ((fn (plist-get (jejeje-test--codeforces-backend) :set-code-js))
          (result (funcall fn "unique_token_xyz")))
     (should (string-match-p "unique_token_xyz" result))))
+
+
+;;; ─── Codeforces backend — :extract-problem-fn ───────────────────────────────
+
+(ert-deftest jejeje-codeforces-backend/extract-problem-fn-is-function ()
+  ":extract-problem-fn is callable."
+  (should (functionp (plist-get (jejeje-test--codeforces-backend)
+                                :extract-problem-fn))))
+
+(ert-deftest jejeje-codeforces-backend/extract-problem-fn-extracts-index ()
+  ":extract-problem-fn returns the problem letter from a problem page URL."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :extract-problem-fn))
+         (result (funcall fn "https://codeforces.com/contest/1352/problem/A")))
+    (should (equal "A" result))))
+
+(ert-deftest jejeje-codeforces-backend/extract-problem-fn-multichar-index ()
+  ":extract-problem-fn handles multi-character problem indices (e.g. \"E1\")."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :extract-problem-fn))
+         (result (funcall fn "https://codeforces.com/contest/999/problem/E1")))
+    (should (equal "E1" result))))
+
+(ert-deftest jejeje-codeforces-backend/extract-problem-fn-returns-nil-on-submit-page ()
+  ":extract-problem-fn returns nil when given the submit page URL."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :extract-problem-fn))
+         (result (funcall fn "https://codeforces.com/contest/1352/submit")))
+    (should (null result))))
+
+
+;;; ─── Codeforces backend — :set-problem-js ───────────────────────────────────
+
+(ert-deftest jejeje-codeforces-backend/set-problem-js-is-function ()
+  ":set-problem-js is callable."
+  (should (functionp (plist-get (jejeje-test--codeforces-backend)
+                                :set-problem-js))))
+
+(ert-deftest jejeje-codeforces-backend/set-problem-js-returns-string ()
+  ":set-problem-js called with an index returns a non-empty string."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :set-problem-js))
+         (result (funcall fn "A")))
+    (should (stringp result))
+    (should (not (string-empty-p result)))))
+
+(ert-deftest jejeje-codeforces-backend/set-problem-js-references-submitted-problem-index ()
+  ":set-problem-js targets the submittedProblemIndex select element."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :set-problem-js))
+         (result (funcall fn "A")))
+    (should (string-match-p "submittedProblemIndex" result))))
+
+(ert-deftest jejeje-codeforces-backend/set-problem-js-embeds-index ()
+  ":set-problem-js output embeds the supplied problem index."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :set-problem-js))
+         (result (funcall fn "E1")))
+    (should (string-match-p "E1" result))))
+
+(ert-deftest jejeje-codeforces-backend/set-problem-js-dispatches-change-event ()
+  ":set-problem-js output fires a DOM change event."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :set-problem-js))
+         (result (funcall fn "A")))
+    (should (string-match-p "change" result))))
 
 
 ;;; ─── Codeforces backend — :redirect-url-fn ──────────────────────────────────

@@ -470,7 +470,27 @@ Signals `user-error' when the command fails or returns an empty value."
                "codeforces\\.com/contest/\\([^/]+\\)/problem/"
                url)
           (format "https://codeforces.com/contest/%s/submit"
-                  (match-string 1 url))))))
+                  (match-string 1 url))))
+     ;; (URL) → problem-index string or nil.  Extracts the problem letter
+     ;; (e.g. "A") from a problem page URL so it can be pre-selected in the
+     ;; "Choose Problem" dropdown on the submit page.
+     :extract-problem-fn
+     ,(lambda (url)
+        (when (string-match
+               "codeforces\\.com/contest/[^/]+/problem/\\([^/?#]+\\)"
+               url)
+          (match-string 1 url)))
+     ;; (INDEX) → JS: set select[name=submittedProblemIndex] and fire change.
+     :set-problem-js
+     ,(lambda (index)
+        (format
+         (concat "(function(){"
+                 "var s=document.querySelector"
+                 "('select[name=submittedProblemIndex]');"
+                 "if(s){s.value=%s;"
+                 "s.dispatchEvent(new Event('change',{bubbles:true}));}"
+                 "})();")
+         (jejeje--js-string index)))))
   "Alist of (URL-REGEXP . PLIST) entries for judge-specific submit behaviour.
 
 Each entry maps a URL regexp to a property list with keys:
@@ -492,6 +512,16 @@ Each entry maps a URL regexp to a property list with keys:
                      injecting JS.  Useful when the submit form lives on a
                      different page than the problem statement.
 
+  :extract-problem-fn  Optional.  Function (URL) → string or nil.  Called
+                     on the original URL (before any redirect) to extract
+                     a problem identifier (e.g. \"A\") that is then passed
+                     to :set-problem-js to pre-select the problem dropdown.
+
+  :set-problem-js    Optional.  Function (INDEX) → JS string.  Sets the
+                     problem-selection dropdown to INDEX and fires a DOM
+                     change event.  Called before the language prompt when
+                     a problem index is available.
+
 To add support for a new judge, push a new entry at the front of this list
 before `jejeje-submit-problem' is called:
 
@@ -509,10 +539,19 @@ first entry whose URL regexp matches URL."
                    (string-match-p (car entry) url))
                  jejeje--submit-backend-alist)))
 
-(defun jejeje--submit-inject (session backend source-code file-ext)
+(defun jejeje--submit-inject (session backend source-code file-ext
+                              &optional problem-index)
   "Inject language choice and SOURCE-CODE into the submit form in SESSION.
 BACKEND is the plist from `jejeje--submit-backend-alist'.
-FILE-EXT is used to pre-filter the language `completing-read' prompt."
+FILE-EXT is used to pre-filter the language `completing-read' prompt.
+When PROBLEM-INDEX is non-nil and the backend provides `:set-problem-js',
+the problem dropdown is set to PROBLEM-INDEX before the language prompt."
+  ;; Pre-select the problem in the dropdown when we know it.
+  (let ((set-problem-fn (plist-get backend :set-problem-js)))
+    (when (and problem-index set-problem-fn)
+      (xwidget-webkit-execute-script
+       session
+       (funcall set-problem-fn problem-index))))
   (xwidget-webkit-execute-script
    session
    (plist-get backend :get-languages-js)
@@ -845,8 +884,12 @@ To add support for another judge, push a new entry onto
        (mapconcat #'car jejeje--submit-backend-alist ", ")))
     ;; If the backend defines a redirect, navigate to the submit page first
     ;; and re-invoke this command after a short delay for the page to load.
-    (let* ((redirect-fn  (plist-get backend :redirect-url-fn))
-           (redirect-url (and redirect-fn (funcall redirect-fn url))))
+    (let* ((redirect-fn    (plist-get backend :redirect-url-fn))
+           (redirect-url   (and redirect-fn (funcall redirect-fn url)))
+           (problem-fn     (plist-get backend :extract-problem-fn))
+           ;; Extract the problem index now, before navigating away.
+           (problem-index  (and redirect-url problem-fn
+                                (funcall problem-fn url))))
       (if redirect-url
           (progn
             ;; Navigate using JS so we can target the specific session object.
@@ -865,7 +908,8 @@ To add support for another judge, push a new entry onto
                 (jejeje--get-xwidget-session)
                 (jejeje--detect-submit-backend redirect-url)
                 source-code
-                file-ext)))
+                file-ext
+                problem-index)))
             (message "Jejeje: navigating to Codeforces submit page…"))
         ;; Already on the submit page — inject directly.
         (jejeje--submit-inject session backend source-code file-ext)))))
