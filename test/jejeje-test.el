@@ -672,7 +672,7 @@ Evaluates BODY inside that sub-directory."
         shown-buf)
     (unwind-protect
         (cl-letf (((symbol-function 'posframe-workable-p)   (lambda ()       nil))
-                  ((symbol-function 'posframe-delete)        #'ignore)
+                  ((symbol-function 'posframe-hide)          #'ignore)
                   ((symbol-function 'posframe-poshandler-frame-center) (lambda (_) nil))
                   ((symbol-function 'posframe-show)
                    (lambda (b &rest _) (setq shown-buf b))))
@@ -680,42 +680,43 @@ Evaluates BODY inside that sub-directory."
           (should (eq buf shown-buf)))
       (kill-buffer buf))))
 
-(ert-deftest jejeje-show-output-buffer/posframe-deletes-stale-frame-when-workable ()
+(ert-deftest jejeje-show-output-buffer/posframe-hides-stale-frame-when-workable ()
   "With method \\='posframe and `posframe-workable-p' returning t, the old
-frame is deleted before showing a new one."
-  (let ((buf (generate-new-buffer "*jejeje-show-pf-del-test*"))
-        delete-called)
+frame is hidden before showing a new one."
+  (let ((buf (generate-new-buffer "*jejeje-show-pf-hide-test*"))
+        hide-called)
     (unwind-protect
         (cl-letf (((symbol-function 'posframe-workable-p)   (lambda ()       t))
-                  ((symbol-function 'posframe-delete)
-                   (lambda (_b) (setq delete-called t)))
+                  ((symbol-function 'posframe-hide)
+                   (lambda (_b) (setq hide-called t)))
                   ((symbol-function 'posframe-poshandler-frame-center) (lambda (_) nil))
                   ((symbol-function 'posframe-show)          #'ignore))
           (jejeje--show-output-buffer buf 'posframe)
-          (should delete-called))
+          (should hide-called))
       (kill-buffer buf))))
 
-(ert-deftest jejeje-show-output-buffer/posframe-skips-delete-when-not-workable ()
+(ert-deftest jejeje-show-output-buffer/posframe-skips-hide-when-not-workable ()
   "With method \\='posframe and `posframe-workable-p' returning nil,
-`posframe-delete' is NOT called."
-  (let ((buf (generate-new-buffer "*jejeje-show-pf-nodel-test*"))
-        delete-called)
+`posframe-hide' is NOT called."
+  (let ((buf (generate-new-buffer "*jejeje-show-pf-nohide-test*"))
+        hide-called)
     (unwind-protect
         (cl-letf (((symbol-function 'posframe-workable-p)   (lambda ()       nil))
-                  ((symbol-function 'posframe-delete)
-                   (lambda (_b) (setq delete-called t)))
+                  ((symbol-function 'posframe-hide)
+                   (lambda (_b) (setq hide-called t)))
                   ((symbol-function 'posframe-poshandler-frame-center) (lambda (_) nil))
                   ((symbol-function 'posframe-show)          #'ignore))
           (jejeje--show-output-buffer buf 'posframe)
-          (should-not delete-called))
+          (should-not hide-called))
       (kill-buffer buf))))
 
-(ert-deftest jejeje-show-output-buffer/posframe-method-binds-q-to-close ()
-  "With method \\='posframe, the \\='q\\=' key in the buffer closes the frame."
+(ert-deftest jejeje-show-output-buffer/posframe-method-binds-q-to-hide ()
+  "With method \\='posframe, the \\='q\\=' key in the buffer hides the frame
+without killing the buffer."
   (let ((buf (generate-new-buffer "*jejeje-show-pf-q-test*")))
     (unwind-protect
         (cl-letf (((symbol-function 'posframe-workable-p)   (lambda ()       nil))
-                  ((symbol-function 'posframe-delete)        #'ignore)
+                  ((symbol-function 'posframe-hide)          #'ignore)
                   ((symbol-function 'posframe-poshandler-frame-center) (lambda (_) nil))
                   ((symbol-function 'posframe-show)          #'ignore))
           (jejeje--show-output-buffer buf 'posframe)

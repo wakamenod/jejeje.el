@@ -114,9 +114,9 @@ The buffer is created if it does not already exist."
 ;; Tell the byte-compiler that these posframe functions exist when the
 ;; optional posframe package is installed.  This suppresses "not known to be
 ;; defined" warnings while keeping posframe as a soft, optional dependency.
-(declare-function posframe-workable-p          "posframe")
-(declare-function posframe-delete              "posframe" (buffer))
-(declare-function posframe-show               "posframe" (buffer-or-name &rest args))
+(declare-function posframe-workable-p              "posframe")
+(declare-function posframe-hide                    "posframe" (buffer-or-name))
+(declare-function posframe-show                    "posframe" (buffer-or-name &rest args))
 (declare-function posframe-poshandler-frame-center "posframe" (info))
 
 (defun jejeje--posframe-available-p ()
@@ -140,9 +140,11 @@ is bound to hide the posframe.
 For \\='buffer: falls back to the standard `display-buffer' function."
   (pcase method
     ('posframe
-     ;; Delete any stale frame first so dimensions are recalculated cleanly.
+     ;; Hide any existing frame first so dimensions are recalculated cleanly.
+     ;; NOTE: posframe-delete also kills the buffer, so we use posframe-hide
+     ;; here to keep the *jejeje* buffer alive for the process output.
      (when (posframe-workable-p)
-       (posframe-delete buf))
+       (posframe-hide buf))
      (posframe-show
       buf
       :position (point)
@@ -157,7 +159,7 @@ For \\='buffer: falls back to the standard `display-buffer' function."
        (local-set-key (kbd "q")
                       (lambda ()
                         (interactive)
-                        (posframe-delete buf)))))
+                        (posframe-hide buf)))))
     (_
      (display-buffer buf))))
 
