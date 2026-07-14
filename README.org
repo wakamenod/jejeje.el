@@ -13,7 +13,7 @@ Supported online judges via the ~je~ tool:
 * Features
 
 - *~jejeje-prepare~*: Interactively select a judge and contest from a fetched list, then fetch problem samples.
-- *~jejeje-test~*: Run test cases against your solution with syntax-highlighted results (~je-test-mode~).  The run command is derived automatically from the current buffer's file type via [[https://github.com/emacsorphanage/quickrun][quickrun]] (no prompt needed).  Use ~C-u~ to override the command for a single invocation.
+- *~jejeje-test~*: Run test cases against your solution with syntax-highlighted results (~je-test-mode~).  The run command is derived automatically from the current buffer's file type via [[https://github.com/emacsorphanage/quickrun][quickrun]] (no prompt needed).  Results are displayed in a floating child-frame via [[https://github.com/tumashu/posframe][posframe]] when it is installed; if the output buffer is already visible in a window it is reused instead.  Use ~C-u~ to choose the display method (posframe / buffer) and override the run command for a single invocation.
 - *~jejeje-info~*: Display contest metadata from ~.je-meta.json~.
 - *~jejeje-browse-problem~*: Open the current problem's web page inside Emacs.  Reads ~.je-meta.json~ from the nearest ancestor directory and matches the current directory name (e.g. ~a~, ~b~) against the task list.  Uses ~xwidget-webkit-browse-url~ when available, falling back to ~browse-url~.
 - *~jejeje-menu~*: A convenient, interactive [[https://github.com/magit/transient][Transient]] popup menu for all commands.
@@ -24,6 +24,7 @@ Supported online judges via the ~je~ tool:
 - *~je~ CLI tool*: Must be installed and accessible via your ~exec-path~ or ~PATH~.
 - *transient*: version 0.4.0 or higher (automatically resolved via package managers).
 - *quickrun*: version 2.3 or higher (automatically resolved via package managers).  Used to detect the compile/run command from the buffer's file type.
+- *posframe* /(optional)/: When installed, ~jejeje-test~ displays results in a floating child-frame instead of an ordinary buffer window.  Install via your package manager (e.g. ~M-x package-install RET posframe~) and set ~jejeje-test-display-method~ to ~'posframe~ (the default) to enable it.
 
 * Installation
 
@@ -83,11 +84,13 @@ If you use ~el-get~ as the package backend for ~leaf~:
 You can customize the behavior of ~jejeje.el~ using ~M-x customize-group RET jejeje~ or by setting variables directly:
 
 #+begin_src elisp
-(setq jejeje-executable "je")     ; Path or name of the `je` executable
-(setq jejeje-test-command nil)    ; nil = auto-detect via quickrun (default)
-                                  ; Set to e.g. "./a.out" to pin a fixed command
-(setq jejeje-test-tle 2.0)        ; Default time-limit in seconds
-(setq jejeje-buffer-name "*jejeje*") ; Name of the output buffer
+(setq jejeje-executable "je")          ; Path or name of the `je` executable
+(setq jejeje-test-command nil)         ; nil = auto-detect via quickrun (default)
+                                       ; Set to e.g. "./a.out" to pin a fixed command
+(setq jejeje-test-tle 2.0)             ; Default time-limit in seconds
+(setq jejeje-buffer-name "*jejeje*")   ; Name of the output buffer
+(setq jejeje-test-display-method       ; How to display `je test' results:
+      'posframe)                        ;   'posframe (default) or 'buffer
 #+end_src
 
 *** ~jejeje-test-command~ in detail
@@ -104,7 +107,25 @@ You can customize the behavior of ~jejeje.el~ using ~M-x customize-group RET jej
 ((nil . ((jejeje-test-command . "./a.out"))))
 #+end_src
 
-~C-u M-x jejeje-test~ always opens a prompt regardless of the variable's value, with the auto-detected command pre-filled as the default.
+*** ~jejeje-test-display-method~ in detail
+
+Controls how ~jejeje-test~ displays its results buffer.
+
+| Value | Behaviour |
+|-------+-----------|
+| ~'posframe~ (default) | Results appear in a floating child-frame centred in the current Emacs frame.  Requires the optional [[https://github.com/tumashu/posframe][posframe]] package; falls back to ~'buffer~ automatically if posframe is not installed. |
+| ~'buffer~ | Results are displayed via the standard ~display-buffer~ mechanism (a split window). |
+
+The display method is resolved in the following priority order each time ~jejeje-test~ is called:
+
+1. An explicit ~DISPLAY-METHOD~ argument (e.g. from a ~C-u~ prompt).
+2. The output buffer is already visible in a window → reuse it without change.
+3. ~posframe~ is installed and ~jejeje-test-display-method~ is ~'posframe~ → floating frame.
+4. Fallback → ~display-buffer~.
+
+When a posframe is open, press ~q~ inside it to dismiss the frame.
+
+~C-u M-x jejeje-test~ always opens a prompt to choose the display method (posframe / buffer) and to override the run command for that invocation, with the auto-detected command pre-filled as the default.
 
 * Usage
 
