@@ -1390,28 +1390,30 @@ Inside BODY the following dynamic variables are available:
 ;;; ─── jejeje-submit-problem — Codeforces integration ─────────────────────────
 
 (ert-deftest jejeje-submit-problem/codeforces-problem-page-triggers-redirect ()
-  "On a Codeforces problem page, navigates the xwidget to the submit page."
+  "On a Codeforces problem page, navigates via JS and schedules injection."
   (let ((fake-session (list 'fake-session))
-        browse-called
-        timer-scheduled)
+        navigation-js
+        timer-fn)
     (cl-letf (((symbol-function 'jejeje--get-xwidget-session)
                (lambda () fake-session))
               ((symbol-function 'xwidget-webkit-uri)
                (lambda (_s)
                  "https://codeforces.com/contest/1352/problem/A"))
               ((symbol-function 'xwidget-webkit-execute-script)
-               (lambda (_s _js &optional _cb) nil))
-              ((symbol-function 'xwidget-webkit-browse-url)
-               (lambda (_s url)
-                 (setq browse-called url)))
+               (lambda (_s js &optional _cb)
+                 ;; Capture the first (navigation) JS call.
+                 (unless navigation-js (setq navigation-js js))))
               ((symbol-function 'run-with-timer)
-               (lambda (_delay _repeat _fn &rest _args)
-                 (setq timer-scheduled t)))
+               (lambda (_delay _repeat fn &rest _args)
+                 (setq timer-fn fn)))
               ((symbol-function 'message) #'ignore))
       (jejeje-submit-problem)
-      (should (stringp browse-called))
-      (should (string-match-p "/contest/1352/submit" browse-called))
-      (should timer-scheduled))))
+      ;; Navigation must be done via window.location.href JS, not browse-url.
+      (should (stringp navigation-js))
+      (should (string-match-p "location\\.href" navigation-js))
+      (should (string-match-p "1352/submit" navigation-js))
+      ;; A timer callback must be scheduled for the deferred injection.
+      (should (functionp timer-fn)))))
 
 (ert-deftest jejeje-submit-problem/codeforces-submit-page-injects-js ()
   "On a Codeforces submit page, three JS calls are made without redirecting."
