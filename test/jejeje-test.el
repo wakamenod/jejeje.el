@@ -1280,5 +1280,149 @@ Inside BODY the following dynamic variables are available:
           (should (equal tpl-dir dired-path)))))))
 
 
+;;; ─── Codeforces backend — helpers ────────────────────────────────────────────
+
+(defun jejeje-test--codeforces-backend ()
+  "Return the Codeforces submit backend plist from `jejeje--submit-backend-alist'."
+  (jejeje--detect-submit-backend
+   "https://codeforces.com/contest/1352/submit"))
+
+
+;;; ─── Codeforces backend — :get-languages-js ─────────────────────────────────
+
+(ert-deftest jejeje-codeforces-backend/get-languages-js-is-string ()
+  ":get-languages-js is a non-empty string."
+  (let ((js (plist-get (jejeje-test--codeforces-backend) :get-languages-js)))
+    (should (stringp js))
+    (should (not (string-empty-p js)))))
+
+(ert-deftest jejeje-codeforces-backend/get-languages-js-references-program-type-select ()
+  ":get-languages-js targets the programTypeId select element."
+  (let ((js (plist-get (jejeje-test--codeforces-backend) :get-languages-js)))
+    (should (string-match-p "programTypeId" js))))
+
+
+;;; ─── Codeforces backend — :set-language-js ──────────────────────────────────
+
+(ert-deftest jejeje-codeforces-backend/set-language-js-is-function ()
+  ":set-language-js value is callable."
+  (should (functionp (plist-get (jejeje-test--codeforces-backend) :set-language-js))))
+
+(ert-deftest jejeje-codeforces-backend/set-language-js-returns-string ()
+  ":set-language-js called with a value returns a non-empty string."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :set-language-js))
+         (result (funcall fn "54")))
+    (should (stringp result))
+    (should (not (string-empty-p result)))))
+
+(ert-deftest jejeje-codeforces-backend/set-language-js-contains-program-type-selector ()
+  ":set-language-js output references the programTypeId select element."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :set-language-js))
+         (result (funcall fn "54")))
+    (should (string-match-p "programTypeId" result))))
+
+(ert-deftest jejeje-codeforces-backend/set-language-js-dispatches-change-event ()
+  ":set-language-js output fires a DOM change event."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :set-language-js))
+         (result (funcall fn "54")))
+    (should (string-match-p "change" result))))
+
+
+;;; ─── Codeforces backend — :set-code-js ──────────────────────────────────────
+
+(ert-deftest jejeje-codeforces-backend/set-code-js-is-function ()
+  ":set-code-js value is callable."
+  (should (functionp (plist-get (jejeje-test--codeforces-backend) :set-code-js))))
+
+(ert-deftest jejeje-codeforces-backend/set-code-js-references-codemirror ()
+  ":set-code-js output references the CodeMirror editor or sourceCodeTextarea."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :set-code-js))
+         (result (funcall fn "int main(){}")))
+    (should (or (string-match-p "CodeMirror" result)
+                (string-match-p "sourceCodeTextarea" result)))))
+
+(ert-deftest jejeje-codeforces-backend/set-code-js-calls-set-value ()
+  ":set-code-js output calls setValue to set the editor content."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :set-code-js))
+         (result (funcall fn "int main(){}")))
+    (should (string-match-p "setValue" result))))
+
+(ert-deftest jejeje-codeforces-backend/set-code-js-escapes-newlines ()
+  "Source code containing newlines is safely embedded in the JS output."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :set-code-js))
+         (result (funcall fn "line1\nline2\nline3")))
+    ;; Literal newline must not appear unescaped inside the JS string.
+    (should (not (string-match-p "\n" result)))))
+
+(ert-deftest jejeje-codeforces-backend/set-code-js-embeds-source-code ()
+  "The supplied source code appears (JSON-encoded) in the JS output."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :set-code-js))
+         (result (funcall fn "unique_token_xyz")))
+    (should (string-match-p "unique_token_xyz" result))))
+
+
+;;; ─── Codeforces backend — :redirect-url-fn ──────────────────────────────────
+
+(ert-deftest jejeje-codeforces-backend/redirect-url-fn-is-function ()
+  ":redirect-url-fn is callable."
+  (should (functionp (plist-get (jejeje-test--codeforces-backend) :redirect-url-fn))))
+
+(ert-deftest jejeje-codeforces-backend/redirect-url-fn-converts-problem-page ()
+  ":redirect-url-fn returns the submit URL when given a problem page URL."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :redirect-url-fn))
+         (result (funcall fn "https://codeforces.com/contest/1352/problem/A")))
+    (should (stringp result))
+    (should (string-match-p "/contest/1352/submit" result))))
+
+(ert-deftest jejeje-codeforces-backend/redirect-url-fn-returns-nil-on-submit-page ()
+  ":redirect-url-fn returns nil when already on the submit page."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :redirect-url-fn))
+         (result (funcall fn "https://codeforces.com/contest/1352/submit")))
+    (should (null result))))
+
+(ert-deftest jejeje-codeforces-backend/redirect-url-fn-preserves-contest-id ()
+  ":redirect-url-fn embeds the correct contest ID in the submit URL."
+  (let* ((fn (plist-get (jejeje-test--codeforces-backend) :redirect-url-fn))
+         (result (funcall fn "https://codeforces.com/contest/9999/problem/B")))
+    (should (string-match-p "contest/9999/submit" result))))
+
+
+;;; ─── jejeje-submit-problem — Codeforces integration ─────────────────────────
+
+(ert-deftest jejeje-submit-problem/codeforces-problem-page-triggers-redirect ()
+  "On a Codeforces problem page, navigates the xwidget to the submit page."
+  (let ((fake-session (list 'fake-session))
+        browse-called
+        timer-scheduled)
+    (cl-letf (((symbol-function 'jejeje--get-xwidget-session)
+               (lambda () fake-session))
+              ((symbol-function 'xwidget-webkit-uri)
+               (lambda (_s)
+                 "https://codeforces.com/contest/1352/problem/A"))
+              ((symbol-function 'xwidget-webkit-execute-script)
+               (lambda (_s _js &optional _cb) nil))
+              ((symbol-function 'xwidget-webkit-browse-url)
+               (lambda (_s url)
+                 (setq browse-called url)))
+              ((symbol-function 'run-with-timer)
+               (lambda (_delay _repeat _fn &rest _args)
+                 (setq timer-scheduled t)))
+              ((symbol-function 'message) #'ignore))
+      (jejeje-submit-problem)
+      (should (stringp browse-called))
+      (should (string-match-p "/contest/1352/submit" browse-called))
+      (should timer-scheduled))))
+
+(ert-deftest jejeje-submit-problem/codeforces-submit-page-injects-js ()
+  "On a Codeforces submit page, three JS calls are made without redirecting."
+  (jejeje-test--with-submit-mocks
+      "https://codeforces.com/contest/1352/submit"
+      "int main(){return 0;}"
+      "GNU G++17 7.3.0"
+    (jejeje-submit-problem)
+    ;; get-languages, set-language, set-code — exactly three calls
+    (should (= 3 (length jejeje-test--js-calls)))))
+
+
 (provide 'jejeje-test)
 ;;; jejeje-test.el ends here

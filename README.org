@@ -14,6 +14,7 @@ Supported online judges via the ~je~ tool:
 
 - *~jejeje-prepare~*: Interactively select a judge and contest from a fetched list, then fetch problem samples.
 - *~jejeje-test~*: Run test cases against your solution with syntax-highlighted results (~jejeje-test-mode~).  The run command is derived automatically from the current buffer's file type via [[https://github.com/emacsorphanage/quickrun][quickrun]] (no prompt needed).  Results are displayed in a floating child-frame via [[https://github.com/tumashu/posframe][posframe]] when it is installed; if the output buffer is already visible in a window it is reused instead.  Use ~C-u~ to choose the display method (posframe / buffer) and override the run command for a single invocation.
+- *~jejeje-submit~*: Submit the current buffer's code from within a live ~xwidget-webkit~ browser session.  Detects the judge from the URL currently open in the xwidget window, prompts for the target language (pre-filtered by file extension), and injects the language choice and source code directly into the page's editor widget via JavaScript — the submit button is intentionally left for the user to press, allowing Cloudflare Turnstile verification when required.  See [[*Submitting solutions][Submitting solutions]] for per-judge details.
 - *~jejeje-info~*: Display contest metadata from ~.je-meta.json~.
 - *~jejeje-browse-problem~*: Open the current problem's web page inside Emacs.  Reads ~.je-meta.json~ from the nearest ancestor directory and matches the current directory name (e.g. ~a~, ~b~) against the task list.  Uses ~xwidget-webkit-browse-url~ when available, falling back to ~browse-url~.
 - *~jejeje-menu~*: A convenient, interactive [[https://github.com/magit/transient][Transient]] popup menu for all commands.
@@ -25,6 +26,7 @@ Supported online judges via the ~je~ tool:
 - *transient*: version 0.4.0 or higher (automatically resolved via package managers).
 - *quickrun*: version 2.3 or higher (automatically resolved via package managers).  Used to detect the compile/run command from the buffer's file type.
 - *posframe* /(optional)/: When installed, ~jejeje-test~ displays results in a floating child-frame instead of an ordinary buffer window.  Install via your package manager (e.g. ~M-x package-install RET posframe~) and set ~jejeje-test-display-method~ to ~'posframe~ (the default) to enable it.
+- *xwidgets* /(optional, required for ~jejeje-submit~)/: ~jejeje-submit~ injects JavaScript into a live browser session via Emacs's built-in ~xwidget-webkit~ support.  This requires Emacs to have been built with ~--with-xwidgets~ (check with ~(featurep 'xwidget-internal)~).  On macOS, [[https://github.com/d12frosted/homebrew-emacs-plus][emacs-plus]] supports this out of the box.
 
 * Installation
 
@@ -127,6 +129,42 @@ When a posframe is open, press ~q~ inside it to dismiss the frame.
 
 ~C-u M-x jejeje-test~ always opens a prompt to choose the display method (posframe / buffer) and to override the run command for that invocation, with the auto-detected command pre-filled as the default.
 
+* Submitting solutions
+
+~jejeje-submit~ fills in the language dropdown and source code editor on a judge's submission page by injecting JavaScript into an open ~xwidget-webkit~ session.  The submit button must be pressed manually (this lets you review the code and pass any CAPTCHA challenge the judge presents).
+
+** AtCoder
+
+1. Open the submit page for the target problem in the xwidget window (e.g. via ~jejeje-browse-problem~ followed by navigating to the Submit tab, or by visiting ~https://atcoder.jp/contests/<contest>/submit~ directly).
+2. Make sure you are logged in inside the xwidget session.
+3. With the source file open in Emacs, run ~M-x jejeje-submit~ (or ~s~ in ~jejeje-menu~).
+4. A ~completing-read~ prompt lists the available languages; the list is pre-filtered by the file extension using ~jejeje-language-alist~.
+5. After you confirm the selection, the language dropdown and the ACE editor widget are filled in automatically.  Press the *Submit* button on the page to finalize.
+
+** Codeforces
+
+The workflow is the same as AtCoder, with one convenience difference: you can invoke ~jejeje-submit~ from the *problem page* (~.../contest/NNN/problem/X~) and the xwidget will be redirected to the corresponding submit page (~.../contest/NNN/submit~) automatically, then ~jejeje-submit~ re-runs after a 2-second delay to allow the page to load.
+
+1. Open any Codeforces contest problem page in the xwidget window (e.g. ~https://codeforces.com/contest/1352/problem/A~), or navigate directly to the submit page.
+2. Make sure you are logged in inside the xwidget session.
+3. Run ~M-x jejeje-submit~.  If you are on a problem page, the xwidget navigates to the submit page and ~jejeje-submit~ is re-scheduled automatically — no further action needed.
+4. Choose the target language at the prompt.
+5. Press *Submit* on the Codeforces page.
+
+** Adding support for other judges
+
+Push a new entry onto ~jejeje--submit-backend-alist~ with the URL regexp and three required functions before calling ~jejeje-submit~:
+
+#+begin_src elisp
+(push '("example\\.com"
+        :get-languages-js "JSON.stringify([…])"  ; JS → [{value, text}, …]
+        :set-language-js  (lambda (value) …)     ; (value) → JS string
+        :set-code-js      (lambda (code) …))     ; (code) → JS string
+      jejeje--submit-backend-alist)
+#+end_src
+
+An optional ~:redirect-url-fn~ key may also be provided: a function ~(URL) → string-or-nil~ that returns a URL to navigate to before injecting JS (useful when the submit form lives on a different page from the problem statement), or ~nil~ to skip the redirect.
+
 * Usage
 
 ** Transient Menu (Recommended)
@@ -143,6 +181,7 @@ Instead of a single command, you can also bind the entire prefix map ~jejeje-map
 Inside ~jejeje-map~, the following default single-key bindings are available:
 - ~p~ : ~jejeje-prepare~
 - ~t~ : ~jejeje-test~
+- ~s~ : ~jejeje-submit~
 - ~i~ : ~jejeje-info~
 - ~w~ : ~jejeje-browse-problem~
 - ~m~ : ~jejeje-menu~

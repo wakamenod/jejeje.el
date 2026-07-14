@@ -422,7 +422,50 @@ Signals `user-error' when the command fails or returns an empty value."
      ,(lambda (code)
         (format
          "(function(){ace.edit('editor').setValue(%s,-1);})();"
-         (jejeje--js-string code)))))
+         (jejeje--js-string code))))
+    ("codeforces\\.com"
+     ;; JS evaluated in the page; must return a JSON array of
+     ;; [{value:"<option-value>", text:"<display-label>"}, …]
+     :get-languages-js
+     ,(concat
+       "JSON.stringify("
+       "Array.from("
+       "document.querySelectorAll('select[name=programTypeId] option')"
+       ").map(function(o){"
+       "return{value:o.value,text:o.textContent.trim()};"
+       "}))")
+     ;; (VALUE) → JS: set the <select> and fire a change event
+     :set-language-js
+     ,(lambda (value)
+        (format
+         (concat "(function(){"
+                 "var s=document.querySelector('select[name=programTypeId]');"
+                 "s.value=%s;"
+                 "s.dispatchEvent(new Event('change',{bubbles:true}));"
+                 "})();")
+         (jejeje--js-string value)))
+     ;; (CODE) → JS: paste CODE into the CodeMirror editor
+     :set-code-js
+     ,(lambda (code)
+        (format
+         (concat "(function(){"
+                 "var ta=document.querySelector('#sourceCodeTextarea');"
+                 "var cm=ta&&ta.nextSibling&&ta.nextSibling.CodeMirror;"
+                 "if(cm){cm.setValue(%s);}"
+                 "else{ta.value=%s;"
+                 "ta.dispatchEvent(new Event('input',{bubbles:true}));}"
+                 "})();")
+         (jejeje--js-string code)
+         (jejeje--js-string code)))
+     ;; (URL) → redirect-URL or nil.  When non-nil, jejeje-submit-problem
+     ;; navigates the xwidget to the returned URL before injecting JS.
+     :redirect-url-fn
+     ,(lambda (url)
+        (when (string-match
+               "codeforces\\.com/contest/\\([^/]+\\)/problem/"
+               url)
+          (format "https://codeforces.com/contest/%s/submit"
+                  (match-string 1 url))))))
   "Alist of (URL-REGEXP . PLIST) entries for judge-specific submit behaviour.
 
 Each entry maps a URL regexp to a property list with keys:
@@ -437,6 +480,12 @@ Each entry maps a URL regexp to a property list with keys:
 
   :set-code-js       Function (CODE) → JS string.  Pastes CODE into the
                      judge's code editor widget (ACE, CodeMirror, etc.).
+
+  :redirect-url-fn   Optional.  Function (URL) → string or nil.  When
+                     non-nil, `jejeje-submit-problem' navigates the xwidget
+                     to the returned URL first, then waits briefly before
+                     injecting JS.  Useful when the submit form lives on a
+                     different page than the problem statement.
 
 To add support for a new judge, push a new entry at the front of this list
 before `jejeje-submit-problem' is called:
@@ -721,9 +770,12 @@ Steps performed automatically:
 The submit button is intentionally left for the user to press manually,
 allowing review and Cloudflare Turnstile verification when required.
 
-Requires a visible xwidget window opened by `jejeje-browse-problem' that
-is already showing an AtCoder (or other supported judge) submit page.
-Navigate to the submit page manually if needed before running this command.
+Requires a visible xwidget window opened by `jejeje-browse-problem'.
+For AtCoder, navigate to the contest submit page first.
+For Codeforces, this command may be run from either the problem page
+\(/contest/NNN/problem/X\) or the submit page \(/contest/NNN/submit\);
+if on a problem page, the xwidget is automatically redirected to the
+corresponding submit page and this command re-runs after a short delay.
 
 To add support for another judge, push a new entry onto
 `jejeje--submit-backend-alist' before calling this command."
@@ -741,47 +793,56 @@ To add support for another judge, push a new entry onto
        "Jejeje: no submit backend for current page (%s) — supported judges: %s"
        url
        (mapconcat #'car jejeje--submit-backend-alist ", ")))
-    ;; Fetch language options from the page asynchronously via JS callback.
-    (xwidget-webkit-execute-script
-     session
-     (plist-get backend :get-languages-js)
-     (lambda (json-str)
-       (let* ((raw
-               (condition-case _
-                   (json-parse-string (or json-str "[]")
-                                      :array-type  'list
-                                      :object-type 'alist)
-                 (error nil)))
-              (_ (unless raw
-                   (user-error
-                    (concat "Jejeje: failed to retrieve language list — "
-                            "make sure the submit page is open in the xwidget window"))))
-              ;; Build (display-text . option-value) alist for completing-read.
-              (candidates
-               (mapcar (lambda (opt)
-                         (cons (cdr (assq 'text  opt))
-                               (cdr (assq 'value opt))))
-                       raw))
-              ;; Look up the hint keyword for this file extension.
-              (hint
-               (and file-ext
-                    (cdr (assoc file-ext jejeje-language-alist))))
-              ;; chosen-text is the display label the user picks.
-              (chosen-text
-               (completing-read "Language: "
-                                (mapcar #'car candidates)
-                                nil t hint))
-              (chosen-value
-               (cdr (assoc chosen-text candidates))))
-         ;; Set language dropdown and fire a DOM change event.
-         (xwidget-webkit-execute-script
-          session
-          (funcall (plist-get backend :set-language-js) chosen-value))
-         ;; Paste source code into the editor widget.
-         (xwidget-webkit-execute-script
-          session
-          (funcall (plist-get backend :set-code-js) source-code))
-         (message "Jejeje: code and language set — please press the submit button"))))))
+    ;; If the backend defines a redirect, navigate to the submit page first
+    ;; and re-invoke this command after a short delay for the page to load.
+    (let* ((redirect-fn  (plist-get backend :redirect-url-fn))
+           (redirect-url (and redirect-fn (funcall redirect-fn url))))
+      (if redirect-url
+          (progn
+            (xwidget-webkit-browse-url session redirect-url)
+            (run-with-timer 2 nil #'jejeje-submit-problem)
+            (message "Jejeje: navigating to Codeforces submit page…"))
+        ;; Fetch language options from the page asynchronously via JS callback.
+        (xwidget-webkit-execute-script
+         session
+         (plist-get backend :get-languages-js)
+         (lambda (json-str)
+           (let* ((raw
+                   (condition-case _
+                       (json-parse-string (or json-str "[]")
+                                          :array-type  'list
+                                          :object-type 'alist)
+                     (error nil)))
+                  (_ (unless raw
+                       (user-error
+                        (concat "Jejeje: failed to retrieve language list — "
+                                "make sure the submit page is open in the xwidget window"))))
+                  ;; Build (display-text . option-value) alist for completing-read.
+                  (candidates
+                   (mapcar (lambda (opt)
+                             (cons (cdr (assq 'text  opt))
+                                   (cdr (assq 'value opt))))
+                           raw))
+                  ;; Look up the hint keyword for this file extension.
+                  (hint
+                   (and file-ext
+                        (cdr (assoc file-ext jejeje-language-alist))))
+                  ;; chosen-text is the display label the user picks.
+                  (chosen-text
+                   (completing-read "Language: "
+                                    (mapcar #'car candidates)
+                                    nil t hint))
+                  (chosen-value
+                   (cdr (assoc chosen-text candidates))))
+             ;; Set language dropdown and fire a DOM change event.
+             (xwidget-webkit-execute-script
+              session
+              (funcall (plist-get backend :set-language-js) chosen-value))
+             ;; Paste source code into the editor widget.
+             (xwidget-webkit-execute-script
+              session
+              (funcall (plist-get backend :set-code-js) source-code))
+             (message "Jejeje: code and language set — please press the submit button"))))))))
 
 
 ;;;###autoload
