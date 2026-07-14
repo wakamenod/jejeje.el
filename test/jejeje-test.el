@@ -1006,6 +1006,28 @@ is installed and `jejeje-test-display-method' is \\='posframe."
          (result (funcall fn "cout << \"hello\" << endl;")))
     (should (string-match-p "\\\\\"" result))))
 
+;;; ─── AtCoder backend — :scroll-js ───────────────────────────────────────────
+
+(ert-deftest jejeje-atcoder-backend/scroll-js-is-string ()
+  ":scroll-js value is a non-empty string."
+  (let ((js (plist-get (jejeje-test--atcoder-backend) :scroll-js)))
+    (should (stringp js))
+    (should (not (string-empty-p js)))))
+
+(ert-deftest jejeje-atcoder-backend/scroll-js-calls-scroll-to ()
+  ":scroll-js invokes window.scrollTo."
+  (let ((js (plist-get (jejeje-test--atcoder-backend) :scroll-js)))
+    (should (string-match-p "scrollTo" js))))
+
+(ert-deftest jejeje-atcoder-backend/scroll-js-scrolls-to-bottom ()
+  ":scroll-js targets document.body.scrollHeight."
+  (let ((js (plist-get (jejeje-test--atcoder-backend) :scroll-js)))
+    (should (string-match-p "document\\.body\\.scrollHeight" js))))
+
+(ert-deftest jejeje-codeforces-backend/no-scroll-js ()
+  "Codeforces backend does not define :scroll-js (redirect handles navigation)."
+  (should (null (plist-get (jejeje-test--codeforces-backend) :scroll-js))))
+
 
 ;;; ─── jejeje--get-xwidget-session ─────────────────────────────────────────────
 
@@ -1180,14 +1202,14 @@ Inside BODY the following dynamic variables are available:
                        (string-match-p "my_unique_code_string_42" js))
                      jejeje-test--js-calls))))
 
-(ert-deftest jejeje-submit-problem/executes-three-js-calls-total ()
-  "Exactly three JS calls are made: get-languages, set-language, set-code."
+(ert-deftest jejeje-submit-problem/executes-four-js-calls-total ()
+  "Exactly four JS calls are made: get-languages, set-language, set-code, scroll."
   (jejeje-test--with-submit-mocks
       "https://atcoder.jp/contests/abc001/submit"
       "print('hello')"
       "Python (CPython 3.8)"
     (jejeje-submit-problem)
-    (should (= 3 (length jejeje-test--js-calls)))))
+    (should (= 4 (length jejeje-test--js-calls)))))
 
 (ert-deftest jejeje-submit-inject/with-problem-index-makes-four-js-calls ()
   "When problem-index is supplied, four JS calls are made (set-problem added)."

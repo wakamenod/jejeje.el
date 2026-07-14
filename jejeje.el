@@ -422,7 +422,10 @@ Signals `user-error' when the command fails or returns an empty value."
      ,(lambda (code)
         (format
          "(function(){ace.edit('editor').setValue(%s,-1);})();"
-         (jejeje--js-string code))))
+         (jejeje--js-string code)))
+     ;; JS: scroll to the bottom of the page so the submit button is visible
+     :scroll-js
+     "window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});")
     ("codeforces\\.com"
      ;; JS evaluated in the page; must return a JSON array of
      ;; [{value:"<option-value>", text:"<display-label>"}, …]
@@ -522,6 +525,10 @@ Each entry maps a URL regexp to a property list with keys:
                      change event.  Called before the language prompt when
                      a problem index is available.
 
+  :scroll-js         Optional.  JS string executed after code and language
+                     are set.  Typically scrolls the page so the submit
+                     button becomes visible without manual scrolling.
+
 To add support for a new judge, push a new entry at the front of this list
 before `jejeje-submit-problem' is called:
 
@@ -591,6 +598,9 @@ the problem dropdown is set to PROBLEM-INDEX before the language prompt."
        (xwidget-webkit-execute-script
         session
         (funcall (plist-get backend :set-code-js) source-code))
+       ;; Scroll to the bottom so the submit button is visible, if supported.
+       (when-let* ((scroll-js (plist-get backend :scroll-js)))
+         (xwidget-webkit-execute-script session scroll-js))
        (message "Jejeje: code and language set — please press the submit button")))))
 
 
