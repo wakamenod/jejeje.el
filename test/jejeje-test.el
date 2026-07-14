@@ -583,5 +583,242 @@ Evaluates BODY inside that sub-directory."
     (should-error (jejeje-browse-problem) :type 'user-error)))
 
 
+;;; ─── jejeje--posframe-available-p ────────────────────────────────────────────
+
+(ert-deftest jejeje-posframe-available-p/returns-nil-when-not-installed ()
+  "Returns nil when posframe is not available as a feature."
+  (cl-letf (((symbol-function 'require)
+             ;; Soft-load always silently fails for posframe
+             (lambda (feature &optional _file noerror)
+               (unless noerror
+                 (signal 'file-error (list "Cannot open load file" feature)))))
+            ((symbol-function 'featurep)
+             (lambda (feature &optional _sub)
+               (if (eq feature 'posframe) nil t))))
+    (should-not (jejeje--posframe-available-p))))
+
+(ert-deftest jejeje-posframe-available-p/returns-non-nil-when-installed ()
+  "Returns non-nil when posframe is registered as a feature."
+  (cl-letf (((symbol-function 'require)
+             (lambda (_feature &rest _) nil))
+            ((symbol-function 'featurep)
+             (lambda (feature &optional _sub)
+               (if (eq feature 'posframe) t nil))))
+    (should (jejeje--posframe-available-p))))
+
+
+;;; ─── jejeje--buffer-visible-p ────────────────────────────────────────────────
+
+(ert-deftest jejeje-buffer-visible-p/returns-nil-when-not-displayed ()
+  "Returns nil when the buffer has no visible window."
+  (let ((buf (generate-new-buffer "*jejeje-vis-nil-test*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window)
+                   (lambda (_buf _frame) nil)))
+          (should-not (jejeje--buffer-visible-p buf)))
+      (kill-buffer buf))))
+
+(ert-deftest jejeje-buffer-visible-p/returns-non-nil-when-displayed ()
+  "Returns non-nil when the buffer has a visible window."
+  (let ((buf (generate-new-buffer "*jejeje-vis-t-test*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window)
+                   ;; Return any non-nil value to simulate a live window
+                   (lambda (_buf _frame) (selected-window))))
+          (should (jejeje--buffer-visible-p buf)))
+      (kill-buffer buf))))
+
+(ert-deftest jejeje-buffer-visible-p/passes-visible-selector ()
+  "Calls `get-buffer-window' with the \\='visible frame selector."
+  (let ((buf (generate-new-buffer "*jejeje-vis-sel-test*"))
+        captured-frame)
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window)
+                   (lambda (_buf frame)
+                     (setq captured-frame frame)
+                     nil)))
+          (jejeje--buffer-visible-p buf)
+          (should (eq 'visible captured-frame)))
+      (kill-buffer buf))))
+
+
+;;; ─── jejeje--show-output-buffer ──────────────────────────────────────────────
+
+(ert-deftest jejeje-show-output-buffer/buffer-method-calls-display-buffer ()
+  "With method \\='buffer, calls `display-buffer' with the target buffer."
+  (let ((buf (generate-new-buffer "*jejeje-show-buf-test*"))
+        displayed)
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-buffer)
+                   (lambda (b &rest _) (setq displayed b))))
+          (jejeje--show-output-buffer buf 'buffer)
+          (should (eq buf displayed)))
+      (kill-buffer buf))))
+
+(ert-deftest jejeje-show-output-buffer/unknown-method-falls-back-to-display-buffer ()
+  "An unrecognised method falls through to `display-buffer'."
+  (let ((buf (generate-new-buffer "*jejeje-show-unk-test*"))
+        called)
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-buffer)
+                   (lambda (_b &rest _) (setq called t))))
+          (jejeje--show-output-buffer buf 'something-unknown)
+          (should called))
+      (kill-buffer buf))))
+
+(ert-deftest jejeje-show-output-buffer/posframe-method-calls-posframe-show ()
+  "With method \\='posframe, calls `posframe-show' with the target buffer."
+  (let ((buf (generate-new-buffer "*jejeje-show-pf-test*"))
+        shown-buf)
+    (unwind-protect
+        (cl-letf (((symbol-function 'posframe-workable-p)   (lambda ()       nil))
+                  ((symbol-function 'posframe-delete)        #'ignore)
+                  ((symbol-function 'posframe-poshandler-frame-center) (lambda (_) nil))
+                  ((symbol-function 'posframe-show)
+                   (lambda (b &rest _) (setq shown-buf b))))
+          (jejeje--show-output-buffer buf 'posframe)
+          (should (eq buf shown-buf)))
+      (kill-buffer buf))))
+
+(ert-deftest jejeje-show-output-buffer/posframe-deletes-stale-frame-when-workable ()
+  "With method \\='posframe and `posframe-workable-p' returning t, the old
+frame is deleted before showing a new one."
+  (let ((buf (generate-new-buffer "*jejeje-show-pf-del-test*"))
+        delete-called)
+    (unwind-protect
+        (cl-letf (((symbol-function 'posframe-workable-p)   (lambda ()       t))
+                  ((symbol-function 'posframe-delete)
+                   (lambda (_b) (setq delete-called t)))
+                  ((symbol-function 'posframe-poshandler-frame-center) (lambda (_) nil))
+                  ((symbol-function 'posframe-show)          #'ignore))
+          (jejeje--show-output-buffer buf 'posframe)
+          (should delete-called))
+      (kill-buffer buf))))
+
+(ert-deftest jejeje-show-output-buffer/posframe-skips-delete-when-not-workable ()
+  "With method \\='posframe and `posframe-workable-p' returning nil,
+`posframe-delete' is NOT called."
+  (let ((buf (generate-new-buffer "*jejeje-show-pf-nodel-test*"))
+        delete-called)
+    (unwind-protect
+        (cl-letf (((symbol-function 'posframe-workable-p)   (lambda ()       nil))
+                  ((symbol-function 'posframe-delete)
+                   (lambda (_b) (setq delete-called t)))
+                  ((symbol-function 'posframe-poshandler-frame-center) (lambda (_) nil))
+                  ((symbol-function 'posframe-show)          #'ignore))
+          (jejeje--show-output-buffer buf 'posframe)
+          (should-not delete-called))
+      (kill-buffer buf))))
+
+(ert-deftest jejeje-show-output-buffer/posframe-method-binds-q-to-close ()
+  "With method \\='posframe, the \\='q\\=' key in the buffer closes the frame."
+  (let ((buf (generate-new-buffer "*jejeje-show-pf-q-test*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'posframe-workable-p)   (lambda ()       nil))
+                  ((symbol-function 'posframe-delete)        #'ignore)
+                  ((symbol-function 'posframe-poshandler-frame-center) (lambda (_) nil))
+                  ((symbol-function 'posframe-show)          #'ignore))
+          (jejeje--show-output-buffer buf 'posframe)
+          (with-current-buffer buf
+            (should (commandp (lookup-key (current-local-map) (kbd "q"))))))
+      (kill-buffer buf))))
+
+
+;;; ─── jejeje-test — display method selection ──────────────────────────────────
+
+;; All tests in this section mock out `jejeje--auto-command' (so no real file
+;; or quickrun look-up is needed) and `jejeje--run' (so no process is spawned).
+;; This lets us focus purely on the display-method selection logic.
+
+(defmacro jejeje-test--with-mocked-run (&rest body)
+  "Evaluate BODY with the process-spawning internals stubbed out.
+`jejeje--auto-command' returns a no-compile Python invocation;
+`jejeje--run' is a no-op."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'jejeje--auto-command)
+              (lambda () (cons nil "python /tmp/sol.py")))
+             ((symbol-function 'jejeje--run)
+              (lambda (_args _buf &optional _sentinel) nil)))
+     ,@body))
+
+(ert-deftest jejeje-test/skips-show-when-buffer-already-visible ()
+  "Does not call `jejeje--show-output-buffer' when the output buffer is
+already displayed in a window."
+  (let (show-called)
+    (jejeje-test--with-mocked-run
+      (cl-letf (((symbol-function 'jejeje--buffer-visible-p)
+                 (lambda (_buf) t))
+                ((symbol-function 'jejeje--show-output-buffer)
+                 (lambda (_buf _method) (setq show-called t))))
+        (jejeje-test)
+        (should-not show-called)))))
+
+(ert-deftest jejeje-test/uses-posframe-when-available-and-configured ()
+  "Calls `jejeje--show-output-buffer' with \\='posframe when posframe is
+installed and `jejeje-test-display-method' is \\='posframe."
+  (let (effective-method)
+    (jejeje-test--with-mocked-run
+      (cl-letf (((symbol-function 'jejeje--buffer-visible-p)   (lambda (_) nil))
+                ((symbol-function 'jejeje--posframe-available-p) (lambda ()  t))
+                ((symbol-function 'jejeje--show-output-buffer)
+                 (lambda (_buf method) (setq effective-method method))))
+        (let ((jejeje-test-display-method 'posframe))
+          (jejeje-test)
+          (should (eq 'posframe effective-method)))))))
+
+(ert-deftest jejeje-test/falls-back-to-buffer-when-posframe-unavailable ()
+  "Falls back to \\='buffer when `jejeje-test-display-method' is \\='posframe
+but posframe is not installed."
+  (let (effective-method)
+    (jejeje-test--with-mocked-run
+      (cl-letf (((symbol-function 'jejeje--buffer-visible-p)   (lambda (_) nil))
+                ((symbol-function 'jejeje--posframe-available-p) (lambda () nil))
+                ((symbol-function 'jejeje--show-output-buffer)
+                 (lambda (_buf method) (setq effective-method method))))
+        (let ((jejeje-test-display-method 'posframe))
+          (jejeje-test)
+          (should (eq 'buffer effective-method)))))))
+
+(ert-deftest jejeje-test/uses-buffer-when-display-method-is-buffer ()
+  "Uses \\='buffer when `jejeje-test-display-method' is set to \\='buffer,
+even if posframe is installed."
+  (let (effective-method)
+    (jejeje-test--with-mocked-run
+      (cl-letf (((symbol-function 'jejeje--buffer-visible-p)   (lambda (_) nil))
+                ((symbol-function 'jejeje--posframe-available-p) (lambda ()  t))
+                ((symbol-function 'jejeje--show-output-buffer)
+                 (lambda (_buf method) (setq effective-method method))))
+        (let ((jejeje-test-display-method 'buffer))
+          (jejeje-test)
+          (should (eq 'buffer effective-method)))))))
+
+(ert-deftest jejeje-test/explicit-display-method-takes-priority ()
+  "An explicit DISPLAY-METHOD argument overrides all automatic logic,
+including an already-visible buffer."
+  (let (effective-method)
+    (jejeje-test--with-mocked-run
+      (cl-letf (((symbol-function 'jejeje--buffer-visible-p)   (lambda (_) t))
+                ((symbol-function 'jejeje--posframe-available-p) (lambda () nil))
+                ((symbol-function 'jejeje--show-output-buffer)
+                 (lambda (_buf method) (setq effective-method method))))
+        ;; Pass 'posframe explicitly even though the buffer appears visible
+        ;; and posframe is "unavailable" — explicit arg wins.
+        (jejeje-test nil 'posframe)
+        (should (eq 'posframe effective-method))))))
+
+(ert-deftest jejeje-test/explicit-buffer-method-overrides-posframe-config ()
+  "Passing \\='buffer explicitly forces buffer display even when posframe
+is installed and `jejeje-test-display-method' is \\='posframe."
+  (let (effective-method)
+    (jejeje-test--with-mocked-run
+      (cl-letf (((symbol-function 'jejeje--buffer-visible-p)   (lambda (_) nil))
+                ((symbol-function 'jejeje--posframe-available-p) (lambda ()  t))
+                ((symbol-function 'jejeje--show-output-buffer)
+                 (lambda (_buf method) (setq effective-method method))))
+        (let ((jejeje-test-display-method 'posframe))
+          (jejeje-test nil 'buffer)
+          (should (eq 'buffer effective-method)))))))
+
+
 (provide 'jejeje-test)
 ;;; jejeje-test.el ends here

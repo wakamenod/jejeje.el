@@ -86,6 +86,18 @@ Set to a non-nil string to pin a specific command for the current project
   :type 'string
   :group 'jejeje)
 
+(defcustom jejeje-test-display-method 'posframe
+  "Default method used to display `je test' results.
+`posframe' opens a floating child-frame (requires the posframe package).
+`buffer'   uses the standard `display-buffer' mechanism.
+If posframe is not installed at runtime, `buffer' is used regardless."
+  :type '(choice (const :tag "Floating frame (posframe)" posframe)
+                 (const :tag "Standard buffer window" buffer))
+  :group 'jejeje)
+
+(defvar jejeje--posframe-buffer " *jejeje-posframe*"
+  "Name of the hidden posframe buffer used to host test-result frames.")
+
 
 ;;; ─── Internal utilities ───────────────────────────────────────────────────────
 
@@ -98,6 +110,56 @@ The buffer is created if it does not already exist."
       (let ((inhibit-read-only t))
         (erase-buffer)))
     buf))
+
+;; Tell the byte-compiler that these posframe functions exist when the
+;; optional posframe package is installed.  This suppresses "not known to be
+;; defined" warnings while keeping posframe as a soft, optional dependency.
+(declare-function posframe-workable-p          "posframe")
+(declare-function posframe-delete              "posframe" (buffer))
+(declare-function posframe-show               "posframe" (buffer-or-name &rest args))
+(declare-function posframe-poshandler-frame-center "posframe" (info))
+
+(defun jejeje--posframe-available-p ()
+  "Return non-nil when the posframe package is available.
+Attempts a soft `require' so that posframe remains an optional dependency."
+  (require 'posframe nil t)
+  (featurep 'posframe))
+
+(defun jejeje--buffer-visible-p (buf)
+  "Return non-nil when BUF is currently displayed in a visible window."
+  (get-buffer-window buf 'visible))
+
+(defun jejeje--show-output-buffer (buf method)
+  "Display BUF using METHOD, either \\='posframe or \\='buffer.
+
+For \\='posframe: shows BUF in a centred child-frame.  The frame width
+is capped at 100 columns and the height is capped at 30 lines; smaller
+content shrinks the frame automatically.  The local \\='q\\=' key in BUF
+is bound to hide the posframe.
+
+For \\='buffer: falls back to the standard `display-buffer' function."
+  (pcase method
+    ('posframe
+     ;; Delete any stale frame first so dimensions are recalculated cleanly.
+     (when (posframe-workable-p)
+       (posframe-delete buf))
+     (posframe-show
+      buf
+      :position (point)
+      :poshandler #'posframe-poshandler-frame-center
+      :width  (min 100 (round (* (frame-width)  0.75)))
+      :height (min 30  (round (* (frame-height) 0.60)))
+      :border-width 2
+      :border-color (face-foreground 'shadow nil t)
+      :accept-focus t)
+     ;; Bind q locally so the user can dismiss the posframe.
+     (with-current-buffer buf
+       (local-set-key (kbd "q")
+                      (lambda ()
+                        (interactive)
+                        (posframe-delete buf)))))
+    (_
+     (display-buffer buf))))
 
 (defun jejeje--ansi-strip (str)
   "Remove ANSI escape sequences from STR.
@@ -349,36 +411,48 @@ from the fetched list.  QUERY becomes the selected contest ID."
            (message "jejeje: prepare failed — see %s" jejeje-buffer-name)))))))
 
 ;;;###autoload
-(defun jejeje-test (&optional command)
+(defun jejeje-test (&optional command display-method)
   "Run `je test' against the solution COMMAND.
 
 When called interactively without a prefix argument and `jejeje-test-command'
 is nil (the default), the run command is derived automatically from the
 current buffer's file type via `quickrun' — no prompt is shown.
 
-With a prefix argument (\\[universal-argument]), or when `jejeje-test-command'
-is set to a non-nil string, a `read-string' prompt is shown so you can
-override the command for this invocation.
+With a prefix argument (\\[universal-argument]), a prompt lets you choose
+the display method (posframe or buffer window) and override the run command
+for this invocation.
+
+How the result buffer is displayed (in order of precedence):
+1. If DISPLAY-METHOD is given explicitly, use it.
+2. If the output buffer is already visible in a window, keep using it.
+3. If `posframe' is installed and `jejeje-test-display-method' is \\='posframe,
+   show a floating child-frame.
+4. Otherwise fall back to the standard `display-buffer' mechanism.
 
 Results are shown in a `je-test-mode' buffer; a summary is also
 displayed in the minibuffer when the process finishes."
   (interactive
-   (list
-    (if (or current-prefix-arg jejeje-test-command)
-        ;; Manual override: show a prompt (C-u always forces this path too)
-        (let ((default (or jejeje-test-command
-                           (cdr (jejeje--auto-command)))))
-          (read-string
-           (format "Command (default: %s): " default)
-           nil nil default))
-      ;; Auto-detect: resolve silently, no prompt
-      nil)))
-  (let* ((auto   (unless command (jejeje--auto-command)))
-         (cmd    (or (and (stringp command) (not (string-empty-p command)) command)
-                     (cdr auto)
-                     jejeje-test-command))
+   (if current-prefix-arg
+       ;; C-u: let the user choose display method AND override the command.
+       (let* ((method (completing-read
+                       "Display method: "
+                       '("posframe" "buffer")
+                       nil t nil nil
+                       (symbol-name jejeje-test-display-method)))
+              (default-cmd (or jejeje-test-command
+                               (cdr (jejeje--auto-command))))
+              (cmd (read-string
+                    (format "Command (default: %s): " default-cmd)
+                    nil nil default-cmd)))
+         (list cmd (intern method)))
+     ;; No prefix: auto-detect command; display method resolved at runtime.
+     (list (when jejeje-test-command jejeje-test-command) nil)))
+  (let* ((auto        (unless command (jejeje--auto-command)))
+         (cmd         (or (and (stringp command) (not (string-empty-p command)) command)
+                          (cdr auto)
+                          jejeje-test-command))
          (compile-cmd (car auto))
-         (buf (jejeje--get-output-buffer)))
+         (buf         (jejeje--get-output-buffer)))
     (unless cmd
       (user-error "Jejeje: could not determine run command; \
 set `jejeje-test-command' or install quickrun"))
@@ -391,7 +465,23 @@ set `jejeje-test-command' or install quickrun"))
                       exit))))
     (with-current-buffer buf
       (je-test-mode))
-    (display-buffer buf)
+    ;; ── Display logic ───────────────────────────────────────────────────────
+    ;; Priority:
+    ;;  1. Explicitly supplied DISPLAY-METHOD (from C-u prompt).
+    ;;  2. Buffer is already visible  → reuse existing window, do nothing.
+    ;;  3. posframe available + configured → posframe.
+    ;;  4. Fallback → display-buffer.
+    (let ((effective-method
+           (cond
+            (display-method display-method)
+            ((jejeje--buffer-visible-p buf) 'existing)
+            ((and (eq jejeje-test-display-method 'posframe)
+                  (jejeje--posframe-available-p))
+             'posframe)
+            (t 'buffer))))
+      (unless (eq effective-method 'existing)
+        (jejeje--show-output-buffer buf effective-method)))
+    ;; ────────────────────────────────────────────────────────────────────────
     (message "jejeje: running tests with `%s' …" cmd)
     (jejeje--run
      (list "test"
@@ -401,7 +491,7 @@ set `jejeje-test-command' or install quickrun"))
      (lambda (proc event)
        (when (string-match-p "finished\\|exited" event)
          (let* ((test-buf (process-buffer proc))
-                (summary (jejeje--parse-test-summary test-buf)))
+                (summary  (jejeje--parse-test-summary test-buf)))
            (with-current-buffer test-buf
              (let ((inhibit-read-only t))
                (goto-char (point-max))
