@@ -95,6 +95,30 @@ If posframe is not installed at runtime, `buffer' is used regardless."
                  (const :tag "Standard buffer window" buffer))
   :group 'jejeje)
 
+(defcustom jejeje-language-alist
+  '(("cpp"  . "C++ (GCC")
+    ("cc"   . "C++ (GCC")
+    ("c"    . "C (GCC")
+    ("py"   . "Python (CPython")
+    ("rb"   . "Ruby")
+    ("rs"   . "Rust")
+    ("hs"   . "Haskell")
+    ("java" . "Java")
+    ("go"   . "Go")
+    ("js"   . "JavaScript")
+    ("ts"   . "TypeScript")
+    ("kt"   . "Kotlin")
+    ("cs"   . "C#")
+    ("d"    . "D (DMD"))
+  "Mapping from file extension to AtCoder language name prefix.
+Used as a hint for `jejeje-submit-problem' to pre-filter the language list
+in `completing-read'.  The value is matched as a prefix/substring of the
+language option text shown on the AtCoder submit page.
+Customise this when the default guesses do not match your preferred dialect."
+  :type '(alist :key-type  (string :tag "File extension (without dot)")
+                :value-type (string :tag "Language name substring"))
+  :group 'jejeje)
+
 (defvar jejeje--posframe-buffer " *jejeje-posframe*"
   "Name of the hidden posframe buffer used to host test-result frames.")
 
@@ -334,6 +358,76 @@ For example, a directory path ending in \".../abc001/a/\" returns \"a\"."
   (file-name-nondirectory
    (directory-file-name (expand-file-name default-directory))))
 
+(defun jejeje--js-string (str)
+  "Encode STR as a JavaScript string literal with surrounding double quotes.
+Uses `json-encode' which handles all necessary escape sequences:
+backslashes, double quotes, newlines, and other control characters.
+The result is safe to interpolate directly into a JS expression."
+  (json-encode str))
+
+
+;;; ─── Submit: judge backends ───────────────────────────────────────────────────
+
+(defvar jejeje--submit-backend-alist
+  `(("atcoder\\.jp"
+     ;; JS evaluated in the page; must return a JSON array of
+     ;; [{value:"<option-value>", text:"<display-label>"}, …]
+     :get-languages-js
+     ,(concat
+       "JSON.stringify("
+       "Array.from("
+       "document.querySelectorAll('#select-lang select option')"
+       ").map(function(o){"
+       "return{value:o.value,text:o.textContent.trim()};"
+       "}))")
+     ;; (VALUE) → JS: set the <select> and fire a change event
+     :set-language-js
+     ,(lambda (value)
+        (format
+         (concat "(function(){"
+                 "var s=document.querySelector('#select-lang select');"
+                 "s.value=%s;"
+                 "s.dispatchEvent(new Event('change',{bubbles:true}));"
+                 "})();")
+         (jejeje--js-string value)))
+     ;; (CODE) → JS: paste CODE into the ACE editor
+     :set-code-js
+     ,(lambda (code)
+        (format
+         "(function(){ace.edit('editor').setValue(%s,-1);})();"
+         (jejeje--js-string code)))))
+  "Alist of (URL-REGEXP . PLIST) entries for judge-specific submit behaviour.
+
+Each entry maps a URL regexp to a property list with keys:
+
+  :get-languages-js  JS string evaluated in the page that must return a
+                     JSON array of objects with \"value\" and \"text\" keys,
+                     one element per language option in the dropdown.
+
+  :set-language-js   Function (VALUE) → JS string.  Sets the language
+                     dropdown to VALUE and fires a DOM change event so that
+                     any reactive UI updates.
+
+  :set-code-js       Function (CODE) → JS string.  Pastes CODE into the
+                     judge's code editor widget (ACE, CodeMirror, etc.).
+
+To add support for a new judge, push a new entry at the front of this list
+before `jejeje-submit-problem' is called:
+
+  (push \\='(\"example\\\\.com\"
+           :get-languages-js \"...\"
+           :set-language-js (lambda (v) ...)
+           :set-code-js     (lambda (c) ...))
+        jejeje--submit-backend-alist)")
+
+(defun jejeje--detect-submit-backend (url)
+  "Return the backend plist for URL, or nil if no entry matches.
+Iterates `jejeje--submit-backend-alist' and returns the plist of the
+first entry whose URL regexp matches URL."
+  (cdr (seq-find (lambda (entry)
+                   (string-match-p (car entry) url))
+                 jejeje--submit-backend-alist)))
+
 
 ;;; ─── Major mode for test results ──────────────────────────────────────────────
 
@@ -521,6 +615,22 @@ Walks up from `default-directory' to find `.je-meta.json'."
                     jejeje-buffer-name)))))))
 
 
+(defun jejeje--get-xwidget-session ()
+  "Return the xwidget-webkit session from a visible xwidget window.
+Searches all windows on the current frame for one whose buffer is in
+`xwidget-webkit-mode'.  Signals `user-error' if none is found or if
+xwidgets are not compiled into this Emacs."
+  (unless (fboundp 'xwidget-webkit-current-session)
+    (user-error "jejeje: xwidgets not available (Emacs must be built with --with-xwidgets)"))
+  (let ((win (seq-find (lambda (w)
+                         (with-current-buffer (window-buffer w)
+                           (derived-mode-p 'xwidget-webkit-mode)))
+                       (window-list))))
+    (unless win
+      (user-error "jejeje: no xwidget window found — run M-x jejeje-browse-problem first"))
+    (with-current-buffer (window-buffer win)
+      (xwidget-webkit-current-session))))
+
 ;;;###autoload
 (defun jejeje-browse-problem ()
   "Open the current problem's web page inside Emacs.
@@ -554,8 +664,8 @@ notice is shown in the minibuffer."
                              task-id)
                     contest-url))))
     (if (fboundp 'xwidget-webkit-browse-url)
-        ;; xwidget が使える場合: 既存の xwidget ウィンドウを再利用、
-        ;; なければ右側に分割して開く
+        ;; xwidget available: reuse an existing xwidget window,
+        ;; or split the frame to the right and open a new one
         (let* ((existing-win
                 (seq-find (lambda (w)
                             (with-current-buffer (window-buffer w)
@@ -565,8 +675,86 @@ notice is shown in the minibuffer."
                                (split-window-right))))
           (select-window target-win)
           (xwidget-webkit-browse-url url))
-      ;; xwidget が使えない場合: 外部ブラウザに委譲
+      ;; xwidget not available: fall back to external browser
       (browse-url url))))
+
+;;;###autoload
+(defun jejeje-submit-problem ()
+  "Fill the submit form in the xwidget browser with the current buffer's code.
+
+Steps performed automatically:
+  1. Detect the judge from the URL shown in the xwidget window.
+  2. Fetch all language options from the page's dropdown via JS.
+  3. Prompt for language selection with `completing-read'.
+     The list is pre-filtered using `jejeje-language-alist' when the
+     current buffer has a recognised file extension.
+  4. Set the chosen language in the dropdown.
+  5. Paste the current buffer's content into the code editor widget.
+
+The submit button is intentionally left for the user to press manually,
+allowing review and Cloudflare Turnstile verification when required.
+
+Requires a visible xwidget window opened by `jejeje-browse-problem' that
+is already showing an AtCoder (or other supported judge) submit page.
+Navigate to the submit page manually if needed before running this command.
+
+To add support for another judge, push a new entry onto
+`jejeje--submit-backend-alist' before calling this command."
+  (interactive)
+  (unless (fboundp 'xwidget-webkit-execute-script)
+    (user-error "jejeje: xwidgets not available (Emacs must be built with --with-xwidgets)"))
+  (let* ((source-code (buffer-string))
+         (file-ext    (when buffer-file-name
+                        (file-name-extension buffer-file-name)))
+         (session     (jejeje--get-xwidget-session))
+         (url         (xwidget-webkit-uri session))
+         (backend     (jejeje--detect-submit-backend url)))
+    (unless backend
+      (user-error
+       "jejeje: no submit backend for current page (%s) — supported judges: %s"
+       url
+       (mapconcat #'car jejeje--submit-backend-alist ", ")))
+    ;; Fetch language options from the page asynchronously via JS callback.
+    (xwidget-webkit-execute-script
+     session
+     (plist-get backend :get-languages-js)
+     (lambda (json-str)
+       (let* ((raw
+               (condition-case _
+                   (json-parse-string (or json-str "[]")
+                                      :array-type  'list
+                                      :object-type 'alist)
+                 (error nil)))
+              (_ (unless raw
+                   (user-error
+                    (concat "jejeje: failed to retrieve language list — "
+                            "make sure the submit page is open in the xwidget window"))))
+              ;; Build (display-text . option-value) alist for completing-read.
+              (candidates
+               (mapcar (lambda (opt)
+                         (cons (cdr (assq 'text  opt))
+                               (cdr (assq 'value opt))))
+                       raw))
+              ;; Look up the hint keyword for this file extension.
+              (hint
+               (and file-ext
+                    (cdr (assoc file-ext jejeje-language-alist))))
+              ;; chosen-text is the display label the user picks.
+              (chosen-text
+               (completing-read "Language: "
+                                (mapcar #'car candidates)
+                                nil t hint))
+              (chosen-value
+               (cdr (assoc chosen-text candidates))))
+         ;; Set language dropdown and fire a DOM change event.
+         (xwidget-webkit-execute-script
+          session
+          (funcall (plist-get backend :set-language-js) chosen-value))
+         ;; Paste source code into the editor widget.
+         (xwidget-webkit-execute-script
+          session
+          (funcall (plist-get backend :set-code-js) source-code))
+         (message "jejeje: code and language set — please press the submit button"))))))
 
 
 ;;; ─── Transient menu ───────────────────────────────────────────────────────────
@@ -577,7 +765,8 @@ notice is shown in the minibuffer."
    ["Contest"
     ("p" "Prepare samples"  jejeje-prepare)
     ("i" "Contest info"     jejeje-info)
-    ("w" "Browse problem"   jejeje-browse-problem)]
+    ("w" "Browse problem"   jejeje-browse-problem)
+    ("s" "Submit problem"   jejeje-submit-problem)]
    ["Test"
     ("t" "Run tests"        jejeje-test)]
    ])
@@ -592,6 +781,7 @@ notice is shown in the minibuffer."
     (define-key map (kbd "t") #'jejeje-test)
     (define-key map (kbd "i") #'jejeje-info)
     (define-key map (kbd "w") #'jejeje-browse-problem)
+    (define-key map (kbd "s") #'jejeje-submit-problem)
     (define-key map (kbd "m") #'jejeje-menu)
     map)
   "Prefix key map for jejeje commands.

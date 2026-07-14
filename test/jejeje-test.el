@@ -821,5 +821,407 @@ is installed and `jejeje-test-display-method' is \\='posframe."
           (should (eq 'buffer effective-method)))))))
 
 
+;;; ─── jejeje--js-string ───────────────────────────────────────────────────────
+
+(ert-deftest jejeje-js-string/plain-string ()
+  "Plain ASCII string is wrapped in double quotes."
+  (should (equal "\"hello\"" (jejeje--js-string "hello"))))
+
+(ert-deftest jejeje-js-string/empty-string ()
+  "Empty string produces an empty JS string literal."
+  (should (equal "\"\"" (jejeje--js-string ""))))
+
+(ert-deftest jejeje-js-string/escapes-double-quotes ()
+  "Double quotes inside the string are escaped."
+  (should (equal "\"say \\\"hi\\\"\"" (jejeje--js-string "say \"hi\""))))
+
+(ert-deftest jejeje-js-string/escapes-backslashes ()
+  "Backslashes are doubled."
+  (should (equal "\"a\\\\b\"" (jejeje--js-string "a\\b"))))
+
+(ert-deftest jejeje-js-string/escapes-newlines ()
+  "Newlines are encoded as \\n."
+  (should (equal "\"line1\\nline2\"" (jejeje--js-string "line1\nline2"))))
+
+(ert-deftest jejeje-js-string/escapes-tabs ()
+  "Tabs are encoded as \\t."
+  (should (equal "\"a\\tb\"" (jejeje--js-string "a\tb"))))
+
+(ert-deftest jejeje-js-string/handles-unicode ()
+  "Unicode characters are preserved or escaped without error."
+  ;; json-encode either keeps printable Unicode as-is or \uXXXX-escapes it;
+  ;; either way the result must be a non-empty string starting with a quote.
+  (let ((result (jejeje--js-string "日本語")))
+    (should (stringp result))
+    (should (string-prefix-p "\"" result))
+    (should (string-suffix-p "\"" result))))
+
+(ert-deftest jejeje-js-string/result-is-valid-for-interpolation ()
+  "The output starts and ends with a double-quote (safe to embed in JS)."
+  (dolist (s '("" "abc" "a\"b" "a\nb" "a\\b"))
+    (let ((result (jejeje--js-string s)))
+      (should (string-prefix-p "\"" result))
+      (should (string-suffix-p "\"" result)))))
+
+
+;;; ─── jejeje--detect-submit-backend ──────────────────────────────────────────
+
+(ert-deftest jejeje-detect-submit-backend/atcoder-matches ()
+  "AtCoder URLs are matched by the built-in backend."
+  (should (jejeje--detect-submit-backend
+           "https://atcoder.jp/contests/abc001/submit")))
+
+(ert-deftest jejeje-detect-submit-backend/atcoder-with-query-string ()
+  "AtCoder submit URL with taskScreenName query param is matched."
+  (should (jejeje--detect-submit-backend
+           "https://atcoder.jp/contests/abc001/submit?taskScreenName=abc001_a")))
+
+(ert-deftest jejeje-detect-submit-backend/unknown-judge-returns-nil ()
+  "An unrecognised URL returns nil."
+  (should (null (jejeje--detect-submit-backend
+                 "https://example.com/submit"))))
+
+(ert-deftest jejeje-detect-submit-backend/empty-url-returns-nil ()
+  "An empty URL string returns nil."
+  (should (null (jejeje--detect-submit-backend ""))))
+
+(ert-deftest jejeje-detect-submit-backend/returns-plist-with-required-keys ()
+  "The returned plist contains all three required keys."
+  (let ((plist (jejeje--detect-submit-backend
+                "https://atcoder.jp/contests/abc001/submit")))
+    (should plist)
+    (should (plist-get plist :get-languages-js))
+    (should (functionp (plist-get plist :set-language-js)))
+    (should (functionp (plist-get plist :set-code-js)))))
+
+(ert-deftest jejeje-detect-submit-backend/custom-backend-is-matched ()
+  "A custom entry pushed onto `jejeje--submit-backend-alist' is detected."
+  (let ((jejeje--submit-backend-alist
+         (cons '("example\\.com"
+                 :get-languages-js "[]"
+                 :set-language-js  (lambda (_v) "")
+                 :set-code-js      (lambda (_c) ""))
+               jejeje--submit-backend-alist)))
+    (should (jejeje--detect-submit-backend "https://example.com/submit"))))
+
+(ert-deftest jejeje-detect-submit-backend/first-matching-entry-wins ()
+  "When two entries match, the first one in the list is returned."
+  (let* ((plist-a '(:get-languages-js "A" :set-language-js ignore :set-code-js ignore))
+         (plist-b '(:get-languages-js "B" :set-language-js ignore :set-code-js ignore))
+         (jejeje--submit-backend-alist
+          `(("example\\.com" . ,plist-a)
+            ("example"       . ,plist-b))))
+    (let ((result (jejeje--detect-submit-backend "https://example.com/submit")))
+      (should (equal "A" (plist-get result :get-languages-js))))))
+
+
+;;; ─── AtCoder backend — :set-language-js ──────────────────────────────────────
+
+(defun jejeje-test--atcoder-backend ()
+  "Return the AtCoder submit backend plist from `jejeje--submit-backend-alist'."
+  (jejeje--detect-submit-backend "https://atcoder.jp/contests/abc001/submit"))
+
+(ert-deftest jejeje-atcoder-backend/set-language-js-is-function ()
+  ":set-language-js value is callable."
+  (should (functionp (plist-get (jejeje-test--atcoder-backend) :set-language-js))))
+
+(ert-deftest jejeje-atcoder-backend/set-language-js-returns-string ()
+  ":set-language-js called with a value returns a non-empty string."
+  (let* ((fn (plist-get (jejeje-test--atcoder-backend) :set-language-js))
+         (result (funcall fn "5001")))
+    (should (stringp result))
+    (should (not (string-empty-p result)))))
+
+(ert-deftest jejeje-atcoder-backend/set-language-js-contains-selector ()
+  ":set-language-js output references the AtCoder language select element."
+  (let* ((fn (plist-get (jejeje-test--atcoder-backend) :set-language-js))
+         (result (funcall fn "5001")))
+    (should (string-match-p "#select-lang" result))))
+
+(ert-deftest jejeje-atcoder-backend/set-language-js-contains-value ()
+  ":set-language-js output embeds the supplied language value."
+  (let* ((fn (plist-get (jejeje-test--atcoder-backend) :set-language-js))
+         (result (funcall fn "5001")))
+    (should (string-match-p "5001" result))))
+
+(ert-deftest jejeje-atcoder-backend/set-language-js-dispatches-change-event ()
+  ":set-language-js output fires a DOM change event."
+  (let* ((fn (plist-get (jejeje-test--atcoder-backend) :set-language-js))
+         (result (funcall fn "5001")))
+    (should (string-match-p "change" result))))
+
+(ert-deftest jejeje-atcoder-backend/set-language-js-escapes-special-chars ()
+  ":set-language-js embeds a value containing special chars without breaking JS."
+  (let* ((fn (plist-get (jejeje-test--atcoder-backend) :set-language-js))
+         (result (funcall fn "C++ (GCC 9.2.1)")))
+    (should (stringp result))
+    ;; The language string must appear (JSON-encoded) somewhere in the output.
+    ;; Use regexp-quote so +, (, ) are treated as literals.
+    (should (string-match-p (regexp-quote "C++ (GCC 9.2.1)") result))))
+
+
+;;; ─── AtCoder backend — :set-code-js ─────────────────────────────────────────
+
+(ert-deftest jejeje-atcoder-backend/set-code-js-is-function ()
+  ":set-code-js value is callable."
+  (should (functionp (plist-get (jejeje-test--atcoder-backend) :set-code-js))))
+
+(ert-deftest jejeje-atcoder-backend/set-code-js-returns-string ()
+  ":set-code-js called with source code returns a non-empty string."
+  (let* ((fn (plist-get (jejeje-test--atcoder-backend) :set-code-js))
+         (result (funcall fn "print('hello')")))
+    (should (stringp result))
+    (should (not (string-empty-p result)))))
+
+(ert-deftest jejeje-atcoder-backend/set-code-js-references-ace-editor ()
+  ":set-code-js output targets the ACE editor instance."
+  (let* ((fn (plist-get (jejeje-test--atcoder-backend) :set-code-js))
+         (result (funcall fn "print('hello')")))
+    (should (string-match-p "ace\\.edit" result))))
+
+(ert-deftest jejeje-atcoder-backend/set-code-js-calls-set-value ()
+  ":set-code-js output calls ACE's setValue method."
+  (let* ((fn (plist-get (jejeje-test--atcoder-backend) :set-code-js))
+         (result (funcall fn "print('hello')")))
+    (should (string-match-p "setValue" result))))
+
+(ert-deftest jejeje-atcoder-backend/set-code-js-escapes-newlines-in-code ()
+  "Source code containing newlines is safely embedded in the JS output."
+  (let* ((fn (plist-get (jejeje-test--atcoder-backend) :set-code-js))
+         (code "line1\nline2\nline3")
+         (result (funcall fn code)))
+    ;; The literal newline must not appear unescaped inside the JS string
+    (should (not (string-match-p "\n" result)))))
+
+(ert-deftest jejeje-atcoder-backend/set-code-js-escapes-backslashes ()
+  "Source code containing backslashes is safely embedded in the JS output."
+  (let* ((fn (plist-get (jejeje-test--atcoder-backend) :set-code-js))
+         (result (funcall fn "path\\to\\file")))
+    ;; Backslashes must be doubled: one backslash becomes \\
+    (should (string-match-p "\\\\\\\\" result))))
+
+(ert-deftest jejeje-atcoder-backend/set-code-js-escapes-double-quotes ()
+  "Source code containing double quotes is safely embedded in the JS output."
+  (let* ((fn (plist-get (jejeje-test--atcoder-backend) :set-code-js))
+         (result (funcall fn "cout << \"hello\" << endl;")))
+    (should (string-match-p "\\\\\"" result))))
+
+
+;;; ─── jejeje--get-xwidget-session ─────────────────────────────────────────────
+
+(ert-deftest jejeje-get-xwidget-session/errors-when-xwidgets-unavailable ()
+  "Signals `user-error' when `xwidget-webkit-current-session' is not bound."
+  ;; Temporarily fmakunbound the symbol so fboundp returns nil naturally,
+  ;; avoiding the infinite-recursion problem of mocking fboundp itself.
+  (let ((was-bound (fboundp 'xwidget-webkit-current-session))
+        (saved-fn  (and (fboundp 'xwidget-webkit-current-session)
+                        (symbol-function 'xwidget-webkit-current-session))))
+    (unwind-protect
+        (progn
+          (fmakunbound 'xwidget-webkit-current-session)
+          (should-error (jejeje--get-xwidget-session) :type 'user-error))
+      ;; Restore the original binding if it existed.
+      (when was-bound
+        (fset 'xwidget-webkit-current-session saved-fn)))))
+
+(ert-deftest jejeje-get-xwidget-session/errors-when-no-xwidget-window ()
+  "Signals `user-error' when no window is in `xwidget-webkit-mode'."
+  ;; xwidget-webkit-current-session is considered available; but window-list
+  ;; returns only a window whose buffer is NOT in xwidget-webkit-mode.
+  (cl-letf (((symbol-function 'xwidget-webkit-current-session)
+             (lambda () (error "should not be called")))
+            ((symbol-function 'window-list)
+             (lambda () (list (selected-window))))
+            ((symbol-function 'derived-mode-p)
+             (lambda (&rest _modes) nil)))
+    ;; Ensure xwidget-webkit-current-session appears bound.
+    (should-error (jejeje--get-xwidget-session) :type 'user-error)))
+
+(ert-deftest jejeje-get-xwidget-session/returns-session-from-xwidget-window ()
+  "Returns the session object when an xwidget-webkit-mode window exists."
+  (let* ((fake-session (list 'fake-xwidget-session))
+         (fake-buf     (generate-new-buffer "*jejeje-xw-test*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'window-list)
+                   (lambda () (list (selected-window))))
+                  ((symbol-function 'window-buffer)
+                   (lambda (_w) fake-buf))
+                  ((symbol-function 'derived-mode-p)
+                   (lambda (&rest _modes) t))
+                  ((symbol-function 'xwidget-webkit-current-session)
+                   (lambda () fake-session)))
+          (with-current-buffer fake-buf
+            (should (eq fake-session (jejeje--get-xwidget-session)))))
+      (kill-buffer fake-buf))))
+
+
+;;; ─── jejeje-submit-problem ───────────────────────────────────────────────────
+
+;; Helper macro — mocks every xwidget and interactive dependency so that
+;; jejeje-submit-problem can run synchronously in batch/ERT mode.
+
+(defmacro jejeje-test--with-submit-mocks
+    (url source-code chosen-language &rest body)
+  "Evaluate BODY with all xwidget and interactive deps mocked for submit.
+
+URL             - the fake URL returned by `xwidget-webkit-uri'
+SOURCE-CODE     - the string that represents the current buffer content
+CHOSEN-LANGUAGE - the display label the fake `completing-read' returns
+
+Inside BODY the following dynamic variables are available:
+  `jejeje-test--js-calls'   list of JS strings passed to execute-script
+  `jejeje-test--lang-calls' list of :set-language-js outputs produced"
+  (declare (indent 3))
+  `(let ((jejeje-test--js-calls   nil)
+         (jejeje-test--lang-calls nil)
+         (fake-session (list 'fake-session)))
+     (cl-letf
+         (;; Mock session retrieval so we skip the real xwidget window search.
+          ((symbol-function 'jejeje--get-xwidget-session)
+           (lambda () fake-session))
+          ;; current URL
+          ((symbol-function 'xwidget-webkit-uri)
+           (lambda (_s) ,url))
+          ;; Intercept all JS injections; synchronously invoke callbacks so
+          ;; the async language-list path runs inline during tests.
+          ((symbol-function 'xwidget-webkit-execute-script)
+           (lambda (_session js &optional callback)
+             (push js jejeje-test--js-calls)
+             (when callback
+               (funcall callback
+                        (json-encode
+                         '(((value . "5001") (text . "C++ (GCC 9.2.1)"))
+                           ((value . "5002") (text . "Python (CPython 3.8)"))))))))
+          ;; user picks a language
+          ((symbol-function 'completing-read)
+           (lambda (_prompt _coll &rest _) ,chosen-language))
+          ;; suppress message output in tests
+          ((symbol-function 'message) #'ignore))
+       ;; Ensure xwidget-webkit-execute-script appears bound so the guard
+       ;; in jejeje-submit-problem passes without mocking fboundp itself.
+       (cl-flet ((xwidget-webkit-execute-script
+                  (session js &optional cb)
+                  (push js jejeje-test--js-calls)
+                  (when cb
+                    (funcall cb
+                             (json-encode
+                              '(((value . "5001") (text . "C++ (GCC 9.2.1)"))
+                                ((value . "5002") (text . "Python (CPython 3.8)"))))))))
+         (with-temp-buffer
+           (insert ,source-code)
+           ,@body)))))
+
+(ert-deftest jejeje-submit-problem/errors-without-xwidgets ()
+  "Signals `user-error' when xwidgets are not compiled in."
+  (let ((was-bound (fboundp 'xwidget-webkit-execute-script))
+        (saved-fn  (and (fboundp 'xwidget-webkit-execute-script)
+                        (symbol-function 'xwidget-webkit-execute-script))))
+    (unwind-protect
+        (progn
+          (fmakunbound 'xwidget-webkit-execute-script)
+          (should-error (jejeje-submit-problem) :type 'user-error))
+      (when was-bound
+        (fset 'xwidget-webkit-execute-script saved-fn)))))
+
+(ert-deftest jejeje-submit-problem/errors-for-unsupported-judge ()
+  "Signals `user-error' when the current page URL matches no backend."
+  (let ((fake-session (list 'fake-session)))
+    (cl-letf (((symbol-function 'jejeje--get-xwidget-session)
+               (lambda () fake-session))
+              ((symbol-function 'xwidget-webkit-uri)
+               (lambda (_s) "https://unsupported-judge.example.com/submit"))
+              ((symbol-function 'xwidget-webkit-execute-script)
+               (lambda (_session _js &optional _cb) nil))
+              ((symbol-function 'message) #'ignore))
+      (should-error (jejeje-submit-problem) :type 'user-error))))
+
+(ert-deftest jejeje-submit-problem/calls-get-languages-js ()
+  "Executes the backend's :get-languages-js script in the xwidget."
+  (jejeje-test--with-submit-mocks
+      "https://atcoder.jp/contests/abc001/submit"
+      "print('hello')"
+      "Python (CPython 3.8)"
+    (jejeje-submit-problem)
+    ;; The first JS call must be the language-list query
+    (should (cl-some (lambda (js)
+                       (string-match-p "select-lang" js))
+                     jejeje-test--js-calls))))
+
+(ert-deftest jejeje-submit-problem/calls-set-language-js ()
+  "Executes a JS snippet that references the language select element."
+  (jejeje-test--with-submit-mocks
+      "https://atcoder.jp/contests/abc001/submit"
+      "print('hello')"
+      "Python (CPython 3.8)"
+    (jejeje-submit-problem)
+    (should (cl-some (lambda (js)
+                       (string-match-p "select-lang" js))
+                     jejeje-test--js-calls))))
+
+(ert-deftest jejeje-submit-problem/calls-set-code-js ()
+  "Executes a JS snippet that calls the ACE editor setValue."
+  (jejeje-test--with-submit-mocks
+      "https://atcoder.jp/contests/abc001/submit"
+      "print('hello')"
+      "Python (CPython 3.8)"
+    (jejeje-submit-problem)
+    (should (cl-some (lambda (js)
+                       (string-match-p "setValue" js))
+                     jejeje-test--js-calls))))
+
+(ert-deftest jejeje-submit-problem/embeds-source-code-in-js ()
+  "The source code content appears (escaped) in the setValue JS call."
+  (jejeje-test--with-submit-mocks
+      "https://atcoder.jp/contests/abc001/submit"
+      "my_unique_code_string_42"
+      "Python (CPython 3.8)"
+    (jejeje-submit-problem)
+    (should (cl-some (lambda (js)
+                       (string-match-p "my_unique_code_string_42" js))
+                     jejeje-test--js-calls))))
+
+(ert-deftest jejeje-submit-problem/executes-three-js-calls-total ()
+  "Exactly three JS calls are made: get-languages, set-language, set-code."
+  (jejeje-test--with-submit-mocks
+      "https://atcoder.jp/contests/abc001/submit"
+      "print('hello')"
+      "Python (CPython 3.8)"
+    (jejeje-submit-problem)
+    (should (= 3 (length jejeje-test--js-calls)))))
+
+
+;;; ─── jejeje-language-alist default values ────────────────────────────────────
+
+(ert-deftest jejeje-language-alist/cpp-hint ()
+  "\"cpp\" maps to a C++ hint string."
+  (let ((hint (cdr (assoc "cpp" jejeje-language-alist))))
+    (should (stringp hint))
+    (should (string-match-p "C++" hint))))
+
+(ert-deftest jejeje-language-alist/py-hint ()
+  "\"py\" maps to a Python hint string."
+  (let ((hint (cdr (assoc "py" jejeje-language-alist))))
+    (should (stringp hint))
+    (should (string-match-p "Python" hint))))
+
+(ert-deftest jejeje-language-alist/rs-hint ()
+  "\"rs\" maps to a Rust hint string."
+  (let ((hint (cdr (assoc "rs" jejeje-language-alist))))
+    (should (stringp hint))
+    (should (string-match-p "Rust" hint))))
+
+(ert-deftest jejeje-language-alist/all-values-are-strings ()
+  "Every value in the default alist is a non-empty string."
+  (dolist (entry jejeje-language-alist)
+    (should (stringp (cdr entry)))
+    (should (not (string-empty-p (cdr entry))))))
+
+(ert-deftest jejeje-language-alist/all-keys-are-strings-without-dot ()
+  "Every key is a string and does not start with a dot."
+  (dolist (entry jejeje-language-alist)
+    (should (stringp (car entry)))
+    (should (not (string-prefix-p "." (car entry))))))
+
+
 (provide 'jejeje-test)
 ;;; jejeje-test.el ends here
