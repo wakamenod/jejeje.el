@@ -1531,5 +1531,201 @@ Inside BODY the following dynamic variables are available:
     (should (= 3 (length jejeje-test--js-calls)))))
 
 
+;;; ─── jejeje--fetch-contests ──────────────────────────────────────────────────
+;;
+;; These tests mock `call-process' so no real `je' binary is invoked.
+;; The key property being checked: the CDR of each returned pair (the value
+;; that will be passed to `je prepare') must be the full contest URL, NOT a
+;; bare numeric ID.  Passing a bare numeric ID triggers an ambiguous all-judge
+;; search in the `je' CLI (regression: "Query '1' did not match direct
+;; patterns. Searching all judges...").
+
+(defmacro jejeje-test--with-mocked-contests (output &rest body)
+  "Evaluate BODY with `call-process' stubbed to emit OUTPUT into the work buffer.
+EXIT-CODE is always 0 (success).  OUTPUT is a string that mimics what
+`je contests <judge>' writes to stdout.
+
+The BUFFER argument of `call-process' may be t (meaning the current buffer),
+a buffer object, or a buffer name string.  We normalise all three cases."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'call-process)
+              (lambda (_program _infile buffer _display &rest _args)
+                ;; buffer can be: t (current), a buffer object, or a string name.
+                (let ((target (cond ((eq buffer t)   (current-buffer))
+                                    ((bufferp buffer) buffer)
+                                    ((stringp buffer) (get-buffer-create buffer))
+                                    (t               (current-buffer)))))
+                  (with-current-buffer target
+                    (insert ,output)))
+                0)))
+     ,@body))
+
+;; Shared sample outputs for each judge, matching the real `je contests' format:
+;;   <id> — <display-name> (<url>)
+
+(defconst jejeje-test--yukicoder-contests-output
+  "Fetching contest list for yukicoder...\n\
+602 \u2014 yukicoder contest 503 (https://yukicoder.me/contests/602)\n\
+601 \u2014 yukicoder contest 502 (https://yukicoder.me/contests/601)\n\
+1 \u2014 yukicoder contest 1 (https://yukicoder.me/contests/1)\n"
+  "Sample stdout from `je contests yukicoder'.")
+
+(defconst jejeje-test--atcoder-contests-output
+  "Fetching contest list for atcoder...\n\
+abc400 \u2014 AtCoder Beginner Contest 400 (https://atcoder.jp/contests/abc400)\n\
+abc001 \u2014 AtCoder Beginner Contest 001 (https://atcoder.jp/contests/abc001)\n"
+  "Sample stdout from `je contests atcoder'.")
+
+(defconst jejeje-test--codeforces-contests-output
+  "Fetching contest list for codeforces...\n\
+2090 \u2014 Codeforces Round 1001 (https://codeforces.com/contest/2090)\n\
+1 \u2014 Codeforces Beta Round 1 (https://codeforces.com/contest/1)\n"
+  "Sample stdout from `je contests codeforces'.")
+
+(defconst jejeje-test--aoj-contests-output
+  "Fetching contest list for aoj...\n\
+ITP1 \u2014 Introduction to Programming I (https://onlinejudge.u-aizu.ac.jp/courses/lesson/2/ITP1/all)\n\
+ITP2 \u2014 Introduction to Programming II (https://onlinejudge.u-aizu.ac.jp/courses/lesson/8/ITP2/all)\n"
+  "Sample stdout from `je contests aoj'.")
+
+;; ── display string (CAR) ────────────────────────────────────────────────────
+
+(ert-deftest jejeje-fetch-contests/yukicoder-display-contains-name-and-id ()
+  "Display string includes the contest name and bracket-quoted numeric ID."
+  (jejeje-test--with-mocked-contests jejeje-test--yukicoder-contests-output
+    (let ((result (jejeje--fetch-contests "yukicoder")))
+      (should result)
+      ;; The earliest contest (contest 1, id=1) should appear somewhere.
+      (should (cl-some (lambda (pair)
+                         (and (string-match-p "yukicoder contest 1" (car pair))
+                              (string-match-p "\\[1\\]" (car pair))))
+                       result)))))
+
+(ert-deftest jejeje-fetch-contests/atcoder-display-contains-name-and-id ()
+  "AtCoder display string includes the contest name and bracket-quoted ID."
+  (jejeje-test--with-mocked-contests jejeje-test--atcoder-contests-output
+    (let ((result (jejeje--fetch-contests "atcoder")))
+      (should result)
+      (should (cl-some (lambda (pair)
+                         (and (string-match-p "AtCoder Beginner Contest 001" (car pair))
+                              (string-match-p "\\[abc001\\]" (car pair))))
+                       result)))))
+
+(ert-deftest jejeje-fetch-contests/codeforces-display-contains-name-and-id ()
+  "Codeforces display string includes the contest name and bracket-quoted ID."
+  (jejeje-test--with-mocked-contests jejeje-test--codeforces-contests-output
+    (let ((result (jejeje--fetch-contests "codeforces")))
+      (should result)
+      (should (cl-some (lambda (pair)
+                         (and (string-match-p "Codeforces Beta Round 1" (car pair))
+                              (string-match-p "\\[1\\]" (car pair))))
+                       result)))))
+
+(ert-deftest jejeje-fetch-contests/aoj-display-contains-name-and-id ()
+  "AOJ display string includes the contest name and bracket-quoted ID."
+  (jejeje-test--with-mocked-contests jejeje-test--aoj-contests-output
+    (let ((result (jejeje--fetch-contests "aoj")))
+      (should result)
+      (should (cl-some (lambda (pair)
+                         (and (string-match-p "Introduction to Programming I" (car pair))
+                              (string-match-p "\\[ITP1\\]" (car pair))))
+                       result)))))
+
+;; ── value (CDR) must be a full URL, never a bare ID ────────────────────────
+;;
+;; This is the core regression guard.  Passing a bare numeric or slug ID to
+;; `je prepare' causes "Query '...' did not match direct patterns. Searching
+;; all judges..." because the CLI performs a global search instead of scoping
+;; to the already-known judge.
+
+(ert-deftest jejeje-fetch-contests/yukicoder-value-is-full-url ()
+  "The CDR (value for `je prepare') is the full https URL, not a bare number.
+Regression: bare id '1' triggered ambiguous global search in the `je' CLI."
+  (jejeje-test--with-mocked-contests jejeje-test--yukicoder-contests-output
+    (let ((result (jejeje--fetch-contests "yukicoder")))
+      (should result)
+      (dolist (pair result)
+        (let ((value (cdr pair)))
+          ;; Must start with https:// — never a bare numeric string.
+          (should (string-prefix-p "https://" value))
+          ;; Must point to the yukicoder domain.
+          (should (string-match-p "yukicoder\\.me" value)))))))
+
+(ert-deftest jejeje-fetch-contests/atcoder-value-is-full-url ()
+  "AtCoder CDR values are full https URLs pointing to atcoder.jp."
+  (jejeje-test--with-mocked-contests jejeje-test--atcoder-contests-output
+    (let ((result (jejeje--fetch-contests "atcoder")))
+      (should result)
+      (dolist (pair result)
+        (let ((value (cdr pair)))
+          (should (string-prefix-p "https://" value))
+          (should (string-match-p "atcoder\\.jp" value)))))))
+
+(ert-deftest jejeje-fetch-contests/codeforces-value-is-full-url ()
+  "Codeforces CDR values are full https URLs pointing to codeforces.com."
+  (jejeje-test--with-mocked-contests jejeje-test--codeforces-contests-output
+    (let ((result (jejeje--fetch-contests "codeforces")))
+      (should result)
+      (dolist (pair result)
+        (let ((value (cdr pair)))
+          (should (string-prefix-p "https://" value))
+          (should (string-match-p "codeforces\\.com" value)))))))
+
+(ert-deftest jejeje-fetch-contests/aoj-value-is-full-url ()
+  "AOJ CDR values are full https URLs pointing to the AOJ domain."
+  (jejeje-test--with-mocked-contests jejeje-test--aoj-contests-output
+    (let ((result (jejeje--fetch-contests "aoj")))
+      (should result)
+      (dolist (pair result)
+        (let ((value (cdr pair)))
+          (should (string-prefix-p "https://" value))
+          (should (string-match-p "u-aizu\\.ac\\.jp" value)))))))
+
+;; ── value never equals the bare ID ─────────────────────────────────────────
+
+(ert-deftest jejeje-fetch-contests/yukicoder-value-not-bare-id ()
+  "No CDR value equals the raw numeric ID string extracted from the line."
+  (jejeje-test--with-mocked-contests jejeje-test--yukicoder-contests-output
+    (let ((result (jejeje--fetch-contests "yukicoder")))
+      ;; IDs in the sample: "602", "601", "1"
+      (dolist (pair result)
+        (should (not (member (cdr pair) '("602" "601" "1"))))))))
+
+(ert-deftest jejeje-fetch-contests/specific-url-mapping ()
+  "The URL stored for 'yukicoder contest 1' is exactly the expected URL."
+  (jejeje-test--with-mocked-contests jejeje-test--yukicoder-contests-output
+    (let* ((result (jejeje--fetch-contests "yukicoder"))
+           ;; Find the pair whose display string mentions contest 1.
+           (pair (cl-find-if
+                  (lambda (p) (string-match-p "\\[1\\]" (car p)))
+                  result)))
+      (should pair)
+      (should (equal "https://yukicoder.me/contests/1" (cdr pair))))))
+
+;; ── error / edge cases ──────────────────────────────────────────────────────
+
+(ert-deftest jejeje-fetch-contests/returns-nil-on-failure ()
+  "Returns nil when `je contests' exits non-zero."
+  (cl-letf (((symbol-function 'call-process)
+             (lambda (_prog _in _buf _disp &rest _args) 1)))  ; exit code 1
+    (should (null (jejeje--fetch-contests "yukicoder")))))
+
+(ert-deftest jejeje-fetch-contests/skips-header-line ()
+  "The 'Fetching contest list...' header line in stdout is silently ignored."
+  (jejeje-test--with-mocked-contests jejeje-test--yukicoder-contests-output
+    (let ((result (jejeje--fetch-contests "yukicoder")))
+      ;; We should get exactly 3 real contest entries, not 4.
+      (should (= 3 (length result))))))
+
+(ert-deftest jejeje-fetch-contests/order-preserved ()
+  "Contests are returned in the same top-to-bottom order as `je' output."
+  (jejeje-test--with-mocked-contests jejeje-test--yukicoder-contests-output
+    (let ((result (jejeje--fetch-contests "yukicoder")))
+      ;; Output order: 602, 601, 1 → same order in result.
+      (should (string-match-p "503" (car (nth 0 result))))
+      (should (string-match-p "502" (car (nth 1 result))))
+      (should (string-match-p "\\[1\\]" (car (nth 2 result)))))))
+
+
 (provide 'jejeje-test)
 ;;; jejeje-test.el ends here

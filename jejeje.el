@@ -197,7 +197,7 @@ For \\='buffer: falls back to the standard `display-buffer' function."
 
 (defun jejeje--fetch-contests (judge &optional limit)
   "Synchronously fetch contest list for JUDGE via `je contests'.
-Returns an alist of (DISPLAY-STRING . ID) pairs suitable for `completing-read',
+Returns an alist of (DISPLAY-STRING . URL) pairs suitable for `completing-read',
 or nil on failure.
 LIMIT is an optional integer cap on the number of contests returned."
   (with-temp-buffer
@@ -222,8 +222,9 @@ LIMIT is an optional integer cap on the number of contests returned."
                            ")")
                        line)
                   (let ((id   (match-string 1 line))
-                        (name (match-string 2 line)))
-                    (push (cons (format "%s  [%s]" name id) id) results))))
+                        (name (match-string 2 line))
+                        (url  (match-string 3 line)))
+                    (push (cons (format "%s  [%s]" name id) url) results))))
               (forward-line 1))
             (nreverse results))
         nil))))
