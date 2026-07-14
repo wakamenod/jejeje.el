@@ -1849,5 +1849,147 @@ Regression: bare id '1' triggered ambiguous global search in the `je' CLI."
       (should (string-match-p "\\[1\\]" (car (nth 2 result)))))))
 
 
+;;; ─── AOJ backend ──────────────────────────────────────────────────────────────
+
+(defun jejeje-test--aoj-backend ()
+  "Return the AOJ submit backend plist from `jejeje--submit-backend-alist'."
+  (jejeje--detect-submit-backend
+   "https://onlinejudge.u-aizu.ac.jp/challenges/sources/JOI/Prelim/0763"))
+
+(ert-deftest jejeje-detect-submit-backend/aoj-matches ()
+  "AOJ URLs are matched by the built-in backend."
+  (should (jejeje-test--aoj-backend)))
+
+(ert-deftest jejeje-aoj-backend/get-languages-js-is-string ()
+  ":get-languages-js is a non-empty string."
+  (let ((js (plist-get (jejeje-test--aoj-backend) :get-languages-js)))
+    (should (stringp js))
+    (should (not (string-empty-p js)))))
+
+(ert-deftest jejeje-aoj-backend/get-languages-js-queries-el-select-items ()
+  ":get-languages-js targets the Element UI el-select dropdown items."
+  (let ((js (plist-get (jejeje-test--aoj-backend) :get-languages-js)))
+    (should (string-match-p "el-select-dropdown__item" js))))
+
+(ert-deftest jejeje-aoj-backend/get-languages-js-filters-hidden ()
+  ":get-languages-js filters out items with display:none."
+  (let ((js (plist-get (jejeje-test--aoj-backend) :get-languages-js)))
+    (should (string-match-p "display" js))
+    (should (string-match-p "none" js))))
+
+(ert-deftest jejeje-aoj-backend/set-language-js-is-function ()
+  ":set-language-js value is callable."
+  (should (functionp (plist-get (jejeje-test--aoj-backend) :set-language-js))))
+
+(ert-deftest jejeje-aoj-backend/set-language-js-returns-string ()
+  ":set-language-js called with a value returns a non-empty string."
+  (let* ((fn (plist-get (jejeje-test--aoj-backend) :set-language-js))
+         (result (funcall fn "C++17")))
+    (should (stringp result))
+    (should (not (string-empty-p result)))))
+
+(ert-deftest jejeje-aoj-backend/set-language-js-clicks-el-input ()
+  ":set-language-js opens the dropdown by clicking the el-input element."
+  (let* ((fn (plist-get (jejeje-test--aoj-backend) :set-language-js))
+         (result (funcall fn "C++17")))
+    (should (string-match-p "el-input__inner" result))
+    (should (string-match-p "\\.click" result))))
+
+(ert-deftest jejeje-aoj-backend/set-language-js-clicks-matching-li ()
+  ":set-language-js clicks the <li> whose text matches the chosen language."
+  (let* ((fn (plist-get (jejeje-test--aoj-backend) :set-language-js))
+         (result (funcall fn "Rust")))
+    (should (string-match-p "el-select-dropdown__item" result))
+    (should (string-match-p (regexp-quote "\"Rust\"") result))))
+
+(ert-deftest jejeje-aoj-backend/set-language-js-embeds-value ()
+  ":set-language-js embeds the supplied value in the JS output."
+  (let* ((fn (plist-get (jejeje-test--aoj-backend) :set-language-js))
+         (result (funcall fn "Python3")))
+    (should (string-match-p (regexp-quote "\"Python3\"") result))))
+
+(ert-deftest jejeje-aoj-backend/set-language-js-uses-settimeout ()
+  ":set-language-js uses setTimeout to wait for the dropdown to open."
+  (let* ((fn (plist-get (jejeje-test--aoj-backend) :set-language-js))
+         (result (funcall fn "Go")))
+    (should (string-match-p "setTimeout" result))))
+
+(ert-deftest jejeje-aoj-backend/set-language-js-escapes-special-chars ()
+  ":set-language-js safely escapes double-quotes and backslashes."
+  (let* ((fn (plist-get (jejeje-test--aoj-backend) :set-language-js))
+         (result (funcall fn "a\"b\\c")))
+    (should (string-match-p (regexp-quote "\\\"") result))))
+
+(ert-deftest jejeje-aoj-backend/set-code-js-is-function ()
+  ":set-code-js value is callable."
+  (should (functionp (plist-get (jejeje-test--aoj-backend) :set-code-js))))
+
+(ert-deftest jejeje-aoj-backend/set-code-js-uses-ace-editor ()
+  ":set-code-js targets the ACE editor (id=\"editor\")."
+  (let* ((fn (plist-get (jejeje-test--aoj-backend) :set-code-js))
+         (result (funcall fn "int main(){}")))
+    (should (string-match-p "ace\\.edit" result))
+    (should (string-match-p (regexp-quote "'editor'") result))))
+
+(ert-deftest jejeje-aoj-backend/set-code-js-calls-set-value ()
+  ":set-code-js calls setValue on the ACE editor."
+  (let* ((fn (plist-get (jejeje-test--aoj-backend) :set-code-js))
+         (result (funcall fn "x=1")))
+    (should (string-match-p "setValue" result))))
+
+(ert-deftest jejeje-aoj-backend/set-code-js-embeds-source-code ()
+  ":set-code-js embeds the supplied source code in the JS output."
+  (let* ((fn (plist-get (jejeje-test--aoj-backend) :set-code-js))
+         (result (funcall fn "my_unique_code_aoj")))
+    (should (string-match-p "my_unique_code_aoj" result))))
+
+(ert-deftest jejeje-aoj-backend/set-code-js-escapes-newlines ()
+  ":set-code-js safely encodes embedded newlines."
+  (let* ((fn (plist-get (jejeje-test--aoj-backend) :set-code-js))
+         (result (funcall fn "line1\nline2")))
+    (should (string-match-p "\\\\n" result))))
+
+(ert-deftest jejeje-aoj-backend/scroll-js-is-string ()
+  ":scroll-js is a non-empty string."
+  (let ((js (plist-get (jejeje-test--aoj-backend) :scroll-js)))
+    (should (stringp js))
+    (should (not (string-empty-p js)))))
+
+(ert-deftest jejeje-aoj-backend/scroll-js-calls-scroll-to ()
+  ":scroll-js calls window.scrollTo."
+  (let ((js (plist-get (jejeje-test--aoj-backend) :scroll-js)))
+    (should (string-match-p "scrollTo" js))))
+
+(ert-deftest jejeje-aoj-backend/no-redirect-url-fn ()
+  "AOJ backend has no :redirect-url-fn (submit form is on the problem page)."
+  (should (null (plist-get (jejeje-test--aoj-backend) :redirect-url-fn))))
+
+(ert-deftest jejeje-submit-problem/aoj-injects-four-js-calls ()
+  "On an AOJ problem page, exactly four JS calls are made: get-languages,
+set-language, scroll, and set-code."
+  (jejeje-test--with-submit-mocks
+      "https://onlinejudge.u-aizu.ac.jp/challenges/sources/JOI/Prelim/0763"
+      "int main(){}"
+      "C++ (GCC 9.2.1)"
+    (jejeje-submit-problem)
+    (should (= 4 (length jejeje-test--js-calls)))))
+
+(ert-deftest jejeje-submit-problem/aoj-scroll-before-code ()
+  "Scroll JS is executed before set-code JS in the AOJ submit flow.
+jejeje-test--js-calls collects calls in push order (newest-first), so:
+  index 0 = last call  (set-code)
+  index 1 = second-to-last (scroll)
+  index 2 = set-language
+  index 3 = first call (get-languages)"
+  (jejeje-test--with-submit-mocks
+      "https://onlinejudge.u-aizu.ac.jp/challenges/sources/JOI/Prelim/0763"
+      "int main(){}"
+      "C++ (GCC 9.2.1)"
+    (jejeje-submit-problem)
+    ;; index 1 must contain scrollTo (scroll step)
+    (should (string-match-p "scrollTo" (nth 1 jejeje-test--js-calls)))
+    ;; index 0 must contain ace.edit (set-code step)
+    (should (string-match-p "ace\\.edit" (nth 0 jejeje-test--js-calls)))))
+
 (provide 'jejeje-test)
 ;;; jejeje-test.el ends here

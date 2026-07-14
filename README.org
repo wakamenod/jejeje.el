@@ -161,6 +161,16 @@ The submit form is embedded directly on the problem page, so no redirect is need
 4. Choose the target language at the prompt.
 5. Press *提出する* on the page to finalize.
 
+** AOJ (Aizu Online Judge)
+
+The submit editor is embedded directly on the problem page (~onlinejudge.u-aizu.ac.jp~), so no redirect is needed.  The language selector uses [[https://element-plus.org/][Element UI]]'s custom dropdown, so ~jejeje-submit~ opens the dropdown and clicks the matching item rather than manipulating a native ~<select>~.
+
+1. Open the problem page in the xwidget window (e.g. ~https://onlinejudge.u-aizu.ac.jp/challenges/sources/JOI/Prelim/0763~).
+2. Make sure you are logged in inside the xwidget session.
+3. With the source file open in Emacs, run ~M-x jejeje-submit~ (or ~s~ in ~jejeje-menu~).
+4. Choose the target language at the prompt.  Languages hidden by the judge (shown as invisible items in the dropdown) are automatically excluded.
+5. Press *Submit* on the page to finalize.
+
 ** Adding support for other judges
 
 Push a new entry onto ~jejeje--submit-backend-alist~ with the URL regexp and three required functions before calling ~jejeje-submit~:

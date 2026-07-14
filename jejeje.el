@@ -532,6 +532,46 @@ Signals `user-error' when the command fails or returns an empty value."
          (jejeje--js-string code)))
      ;; JS: scroll to the bottom of the page so the submit button is visible
      :scroll-js
+     "window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});")
+    ("onlinejudge\\.u-aizu\\.ac\\.jp"
+     ;; AOJ uses Element UI <el-select> — a custom Vue/element component that
+     ;; renders language options as <li class="el-select-dropdown__item">.
+     ;; Items hidden with display:none are excluded (unavailable for the problem).
+     :get-languages-js
+     ,(concat
+       "JSON.stringify("
+       "Array.from("
+       "document.querySelectorAll('.el-select-dropdown__item')"
+       ").filter(function(li){"
+       "return li.style.display!=='none';"
+       "}).map(function(li){"
+       "var t=li.textContent.trim();"
+       "return{value:t,text:t};"
+       "}))")
+     ;; (VALUE) → JS: open the Element UI dropdown by clicking its input,
+     ;; then after a short delay click the matching <li> item.
+     :set-language-js
+     ,(lambda (value)
+        (format
+         (concat "(function(){"
+                 "var inp=document.querySelector('.el-select .el-input__inner');"
+                 "if(inp){inp.click();}"
+                 "setTimeout(function(){"
+                 "var items=document.querySelectorAll('.el-select-dropdown__item');"
+                 "for(var i=0;i<items.length;i++){"
+                 "if(items[i].textContent.trim()===%s){"
+                 "items[i].click();break;}}"
+                 "},200);"
+                 "})();")
+         (jejeje--js-string value)))
+     ;; (CODE) → JS: paste CODE into the ACE editor (id="editor")
+     :set-code-js
+     ,(lambda (code)
+        (format
+         "(function(){ace.edit('editor').setValue(%s,-1);})();"
+         (jejeje--js-string code)))
+     ;; JS: scroll to the bottom of the page so the submit button is visible
+     :scroll-js
      "window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});"))
   "Alist of (URL-REGEXP . PLIST) entries for judge-specific submit behaviour.
 
@@ -633,13 +673,14 @@ the problem dropdown is set to PROBLEM-INDEX before the language prompt."
        (xwidget-webkit-execute-script
         session
         (funcall (plist-get backend :set-language-js) chosen-value))
+       ;; Scroll to the bottom so the submit button and editor are visible,
+       ;; if supported.  Done before pasting so the editor is in view.
+       (when-let* ((scroll-js (plist-get backend :scroll-js)))
+         (xwidget-webkit-execute-script session scroll-js))
        ;; Paste source code into the editor widget.
        (xwidget-webkit-execute-script
         session
         (funcall (plist-get backend :set-code-js) source-code))
-       ;; Scroll to the bottom so the submit button is visible, if supported.
-       (when-let* ((scroll-js (plist-get backend :scroll-js)))
-         (xwidget-webkit-execute-script session scroll-js))
        (message "Jejeje: code and language set — please press the submit button")))))
 
 
