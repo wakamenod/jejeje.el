@@ -151,6 +151,16 @@ The workflow is the same as AtCoder, with one convenience difference: you can in
 4. Choose the target language at the prompt.
 5. Press *Submit* on the Codeforces page.
 
+** yukicoder
+
+The submit form is embedded directly on the problem page, so no redirect is needed.
+
+1. Open the problem page in the xwidget window (e.g. ~https://yukicoder.me/problems/no/1234~).
+2. Make sure you are logged in inside the xwidget session.
+3. With the source file open in Emacs, run ~M-x jejeje-submit~ (or ~s~ in ~jejeje-menu~).
+4. Choose the target language at the prompt.
+5. Press *提出する* on the page to finalize.
+
 ** Adding support for other judges
 
 Push a new entry onto ~jejeje--submit-backend-alist~ with the URL regexp and three required functions before calling ~jejeje-submit~:

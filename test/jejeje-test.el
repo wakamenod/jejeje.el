@@ -1531,6 +1531,128 @@ Inside BODY the following dynamic variables are available:
     (should (= 3 (length jejeje-test--js-calls)))))
 
 
+;;; ─── yukicoder backend ────────────────────────────────────────────────────────
+
+(defun jejeje-test--yukicoder-backend ()
+  "Return the yukicoder submit backend plist from `jejeje--submit-backend-alist'."
+  (jejeje--detect-submit-backend "https://yukicoder.me/problems/no/1234"))
+
+(ert-deftest jejeje-detect-submit-backend/yukicoder-matches ()
+  "yukicoder URLs are matched by the built-in backend."
+  (should (jejeje-test--yukicoder-backend)))
+
+(ert-deftest jejeje-yukicoder-backend/get-languages-js-is-string ()
+  ":get-languages-js is a non-empty string."
+  (let ((js (plist-get (jejeje-test--yukicoder-backend) :get-languages-js)))
+    (should (stringp js))
+    (should (not (string-empty-p js)))))
+
+(ert-deftest jejeje-yukicoder-backend/get-languages-js-references-lang-select ()
+  ":get-languages-js targets the #lang select element."
+  (let ((js (plist-get (jejeje-test--yukicoder-backend) :get-languages-js)))
+    (should (string-match-p "select#lang" js))))
+
+(ert-deftest jejeje-yukicoder-backend/set-language-js-is-function ()
+  ":set-language-js value is callable."
+  (should (functionp (plist-get (jejeje-test--yukicoder-backend) :set-language-js))))
+
+(ert-deftest jejeje-yukicoder-backend/set-language-js-returns-string ()
+  ":set-language-js called with a value returns a non-empty string."
+  (let* ((fn (plist-get (jejeje-test--yukicoder-backend) :set-language-js))
+         (result (funcall fn "cpp23")))
+    (should (stringp result))
+    (should (not (string-empty-p result)))))
+
+(ert-deftest jejeje-yukicoder-backend/set-language-js-contains-lang-selector ()
+  ":set-language-js output references the yukicoder #lang select element."
+  (let* ((fn (plist-get (jejeje-test--yukicoder-backend) :set-language-js))
+         (result (funcall fn "cpp23")))
+    (should (string-match-p "select#lang" result))))
+
+(ert-deftest jejeje-yukicoder-backend/set-language-js-embeds-value ()
+  ":set-language-js embeds the supplied value in the JS output."
+  (let* ((fn (plist-get (jejeje-test--yukicoder-backend) :set-language-js))
+         (result (funcall fn "rust")))
+    (should (string-match-p (regexp-quote "\"rust\"") result))))
+
+(ert-deftest jejeje-yukicoder-backend/set-language-js-dispatches-change-event ()
+  ":set-language-js fires a DOM change event."
+  (let* ((fn (plist-get (jejeje-test--yukicoder-backend) :set-language-js))
+         (result (funcall fn "python3")))
+    (should (string-match-p "change" result))
+    (should (string-match-p "dispatchEvent" result))))
+
+(ert-deftest jejeje-yukicoder-backend/set-language-js-escapes-special-chars ()
+  ":set-language-js safely escapes double-quotes and backslashes via jejeje--js-string."
+  (let* ((fn (plist-get (jejeje-test--yukicoder-backend) :set-language-js))
+         (result (funcall fn "a\"b\\c")))
+    (should (string-match-p (regexp-quote "\\\"") result))))
+
+(ert-deftest jejeje-yukicoder-backend/set-code-js-is-function ()
+  ":set-code-js value is callable."
+  (should (functionp (plist-get (jejeje-test--yukicoder-backend) :set-code-js))))
+
+(ert-deftest jejeje-yukicoder-backend/set-code-js-references-rich-source ()
+  ":set-code-js targets the ACE editor element (rich_source)."
+  (let* ((fn (plist-get (jejeje-test--yukicoder-backend) :set-code-js))
+         (result (funcall fn "int main(){}")))
+    (should (string-match-p "rich_source" result))))
+
+(ert-deftest jejeje-yukicoder-backend/set-code-js-references-textarea ()
+  ":set-code-js also targets the raw textarea (#source) as a fallback."
+  (let* ((fn (plist-get (jejeje-test--yukicoder-backend) :set-code-js))
+         (result (funcall fn "int main(){}")))
+    (should (string-match-p (regexp-quote "'source'") result))))
+
+(ert-deftest jejeje-yukicoder-backend/set-code-js-calls-set-value ()
+  ":set-code-js calls setValue on the ACE editor."
+  (let* ((fn (plist-get (jejeje-test--yukicoder-backend) :set-code-js))
+         (result (funcall fn "x=1")))
+    (should (string-match-p "setValue" result))))
+
+(ert-deftest jejeje-yukicoder-backend/set-code-js-embeds-source-code ()
+  ":set-code-js embeds the supplied source code in the JS output."
+  (let* ((fn (plist-get (jejeje-test--yukicoder-backend) :set-code-js))
+         (result (funcall fn "my_unique_code_42")))
+    (should (string-match-p "my_unique_code_42" result))))
+
+(ert-deftest jejeje-yukicoder-backend/set-code-js-escapes-newlines ()
+  ":set-code-js safely encodes embedded newlines."
+  (let* ((fn (plist-get (jejeje-test--yukicoder-backend) :set-code-js))
+         (result (funcall fn "line1\nline2")))
+    (should (string-match-p "\\\\n" result))))
+
+(ert-deftest jejeje-yukicoder-backend/set-code-js-escapes-backslashes ()
+  ":set-code-js safely encodes embedded backslashes."
+  (let* ((fn (plist-get (jejeje-test--yukicoder-backend) :set-code-js))
+         (result (funcall fn "a\\b")))
+    (should (string-match-p "\\\\\\\\" result))))
+
+(ert-deftest jejeje-yukicoder-backend/scroll-js-is-string ()
+  ":scroll-js is a non-empty string."
+  (let ((js (plist-get (jejeje-test--yukicoder-backend) :scroll-js)))
+    (should (stringp js))
+    (should (not (string-empty-p js)))))
+
+(ert-deftest jejeje-yukicoder-backend/scroll-js-calls-scroll-to ()
+  ":scroll-js calls window.scrollTo."
+  (let ((js (plist-get (jejeje-test--yukicoder-backend) :scroll-js)))
+    (should (string-match-p "scrollTo" js))))
+
+(ert-deftest jejeje-yukicoder-backend/no-redirect-url-fn ()
+  "yukicoder backend has no :redirect-url-fn (form is on the problem page)."
+  (should (null (plist-get (jejeje-test--yukicoder-backend) :redirect-url-fn))))
+
+(ert-deftest jejeje-submit-problem/yukicoder-injects-four-js-calls ()
+  "On a yukicoder problem page, exactly four JS calls are made: get-languages,
+set-language, set-code, and scroll."
+  (jejeje-test--with-submit-mocks
+      "https://yukicoder.me/problems/no/1234"
+      "fn main() {}"
+      "Rust\n(1.94.0 + proconio + num + itertools)"
+    (jejeje-submit-problem)
+    (should (= 4 (length jejeje-test--js-calls)))))
+
 ;;; ─── jejeje--fetch-contests ──────────────────────────────────────────────────
 ;;
 ;; These tests mock `call-process' so no real `je' binary is invoked.

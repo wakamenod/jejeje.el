@@ -494,7 +494,45 @@ Signals `user-error' when the command fails or returns an empty value."
                  "if(s){s.value=%s;"
                  "s.dispatchEvent(new Event('change',{bubbles:true}));}"
                  "})();")
-         (jejeje--js-string index)))))
+         (jejeje--js-string index))))
+    ("yukicoder\\.me"
+     ;; JS evaluated in the page; must return a JSON array of
+     ;; [{value:"<option-value>", text:"<display-label>"}, …]
+     :get-languages-js
+     ,(concat
+       "JSON.stringify("
+       "Array.from("
+       "document.querySelectorAll('select#lang option')"
+       ").map(function(o){"
+       "return{value:o.value,text:o.textContent.trim()};"
+       "}))")
+     ;; (VALUE) → JS: set the <select> and fire a change event
+     :set-language-js
+     ,(lambda (value)
+        (format
+         (concat "(function(){"
+                 "var s=document.querySelector('select#lang');"
+                 "s.value=%s;"
+                 "s.dispatchEvent(new Event('change',{bubbles:true}));"
+                 "})();")
+         (jejeje--js-string value)))
+     ;; (CODE) → JS: paste CODE into the ACE editor (rich_source) if present,
+     ;; then also write to the raw textarea (#source) as a fallback.
+     :set-code-js
+     ,(lambda (code)
+        (format
+         (concat "(function(){"
+                 "var el=document.getElementById('rich_source');"
+                 "var editor=el&&el.env&&el.env.editor;"
+                 "if(editor){editor.setValue(%s,-1);}"
+                 "var ta=document.getElementById('source');"
+                 "if(ta){ta.value=%s;}"
+                 "})();")
+         (jejeje--js-string code)
+         (jejeje--js-string code)))
+     ;; JS: scroll to the bottom of the page so the submit button is visible
+     :scroll-js
+     "window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});"))
   "Alist of (URL-REGEXP . PLIST) entries for judge-specific submit behaviour.
 
 Each entry maps a URL regexp to a property list with keys:
