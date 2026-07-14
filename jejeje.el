@@ -665,7 +665,6 @@ from the fetched list.  QUERY becomes the selected contest ID."
   (let ((buf (jejeje--get-output-buffer)))
     (with-current-buffer buf
       (special-mode))
-    (display-buffer buf)
     (message "Jejeje: preparing %s …" query)
     (jejeje--run
      (list "prepare" query)
@@ -679,6 +678,7 @@ from the fetched list.  QUERY becomes the selected contest ID."
              (insert (propertize "[je prepare done]" 'face 'shadow))))
          (if (= 0 (process-exit-status proc))
              (message "Jejeje: prepare complete for %s" query)
+           (display-buffer buf)
            (message "Jejeje: prepare failed — see %s" jejeje-buffer-name)))))))
 
 ;;;###autoload
