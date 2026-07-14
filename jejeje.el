@@ -444,16 +444,21 @@ Signals `user-error' when the command fails or returns an empty value."
                  "s.dispatchEvent(new Event('change',{bubbles:true}));"
                  "})();")
          (jejeje--js-string value)))
-     ;; (CODE) → JS: paste CODE into the CodeMirror editor
+     ;; (CODE) → JS: paste CODE into the CodeMirror editor.
+     ;; Use the CSS adjacent-sibling selector to find the CodeMirror div that
+     ;; immediately follows #sourceCodeTextarea; nextSibling is unreliable
+     ;; because it may return a text node (whitespace) instead of an element.
      :set-code-js
      ,(lambda (code)
         (format
          (concat "(function(){"
+                 "var cmEl=document.querySelector"
+                 "('#sourceCodeTextarea + .CodeMirror');"
+                 "var cm=cmEl&&cmEl.CodeMirror;"
+                 "if(cm){cm.setValue(%s);cm.refresh();}"
                  "var ta=document.querySelector('#sourceCodeTextarea');"
-                 "var cm=ta&&ta.nextSibling&&ta.nextSibling.CodeMirror;"
-                 "if(cm){cm.setValue(%s);}"
-                 "else{ta.value=%s;"
-                 "ta.dispatchEvent(new Event('input',{bubbles:true}));}"
+                 "if(ta){ta.value=%s;"
+                 "ta.dispatchEvent(new Event('change',{bubbles:true}));}"
                  "})();")
          (jejeje--js-string code)
          (jejeje--js-string code)))
