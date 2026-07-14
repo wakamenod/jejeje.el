@@ -373,7 +373,7 @@ The result is safe to interpolate directly into a JS expression."
 Runs `je config template_dir' synchronously using `jejeje-executable' and
 returns the trimmed output string.
 Signals `user-error' when the command fails or returns an empty value."
-  (let* ((result
+  (let* ((raw
           (with-temp-buffer
             (let ((exit-code
                    (call-process jejeje-executable nil t nil
@@ -381,7 +381,13 @@ Signals `user-error' when the command fails or returns an empty value."
               (if (= 0 exit-code)
                   (string-trim (buffer-string))
                 (user-error "Jejeje: `je config template_dir' failed (exit %d)"
-                            exit-code))))))
+                            exit-code)))))
+         ;; Output format: "template_dir = /path/to/dir"  — extract the value.
+         (result (if (string-match (rx bol (* nonl) "=" (* space)
+                                       (group (+ nonl)) eol)
+                                   raw)
+                     (string-trim (match-string 1 raw))
+                   raw)))
     (when (string-empty-p result)
       (user-error "Jejeje: template_dir is not set — run `je config template_dir <path>'"))
     result))
