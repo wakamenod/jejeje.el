@@ -48,11 +48,11 @@ The download happens synchronously (blocking) so the command you issued runs imm
 
 ** Automatic background updates
 
-Each time Emacs starts, ~jejeje.el~ asynchronously checks whether a newer release is available.  If a newer version is found, it is downloaded and installed silently in the background — no interruption to your editing session.
+Each time Emacs starts, ~jejeje.el~ asynchronously checks whether a newer release is available by comparing the output of ~je -V~ with the latest tag on GitHub.  If a newer version is found, it is downloaded and installed silently in the background — no interruption to your editing session.
 
 ** Manual update
 
-Force an update by deleting ~<user-emacs-directory>/jejeje/version~ and restarting Emacs or invoking any ~jejeje~ command.  A dedicated ~M-x jejeje-update-executable~ command is planned for a future release.
+A dedicated ~M-x jejeje-update-executable~ command is planned for a future release.  In the meantime, force an update by deleting the managed binary and restarting Emacs or invoking any ~jejeje~ command.
 
 ** Binary location
 
@@ -62,8 +62,6 @@ The managed binary lives at:
 ~/.emacs.d/jejeje/je        ; Unix
 ~/.emacs.d/jejeje/je.exe    ; Windows
 #+end_src
-
-A version-cache file at ~<user-emacs-directory>/jejeje/version~ records the installed tag (e.g. ~v0.1.0~) and is used to detect when an update is available.
 
 ** Using a custom ~je~ binary
 

@@ -135,9 +135,6 @@ The default resolves to the \"jejeje/\" subdirectory of `user-emacs-directory'."
   "https://api.github.com/repos/wakamenod/jejeje/releases/latest"
   "GitHub API endpoint that returns the latest jejeje release metadata.")
 
-(defconst jejeje--version-cache-file "version"
-  "File name relative to `jejeje--executable-dir' caching the installed version.")
-
 (defun jejeje--executable-path ()
   "Return the absolute path to the managed `je' binary.
 On Windows the binary is named `je.exe'; elsewhere `je'."
@@ -145,23 +142,15 @@ On Windows the binary is named `je.exe'; elsewhere `je'."
    (if (eq system-type 'windows-nt) "je.exe" "je")
    jejeje--executable-dir))
 
-(defun jejeje--cached-version ()
-  "Return the version string stored in the version-cache file, or nil.
-The cache file lives at `jejeje--executable-dir'/`jejeje--version-cache-file'."
-  (let ((cache (expand-file-name jejeje--version-cache-file
-                                 jejeje--executable-dir)))
-    (when (file-readable-p cache)
-      (string-trim (with-temp-buffer
-                     (insert-file-contents cache)
-                     (buffer-string))))))
-
-(defun jejeje--write-cached-version (version)
-  "Persist VERSION string into the version-cache file.
-Creates `jejeje--executable-dir' if it does not yet exist."
-  (make-directory jejeje--executable-dir t)
-  (write-region version nil
-                (expand-file-name jejeje--version-cache-file
-                                  jejeje--executable-dir)))
+(defun jejeje--installed-version ()
+  "Return the version string reported by the managed `je' binary, or nil.
+Runs `je -V' synchronously and returns the trimmed output (e.g. \"je 0.1.0\").
+Returns nil when the binary does not exist or the invocation fails."
+  (let ((path (jejeje--executable-path)))
+    (when (file-executable-p path)
+      (with-temp-buffer
+        (when (= 0 (call-process path nil t nil "-V"))
+          (string-trim (buffer-string)))))))
 
 (defun jejeje--release-asset-url (release-data)
   "Return the download URL for this OS from RELEASE-DATA (a parsed JSON object).
@@ -212,8 +201,7 @@ Steps:
   1. Resolve the correct asset URL for this OS.
   2. Download the archive to a temporary file with `url-copy-file'.
   3. Extract the binary with `tar' (Unix) or Expand-Archive (Windows PS).
-  4. Move the binary to `jejeje--executable-path' and make it executable.
-  5. Write the version tag to the cache file.
+  4. Copy the binary to `jejeje--executable-path' and make it executable.
 Signals `user-error' if any step fails."
   (let* ((version     (gethash "tag_name" release-data))
          (asset-url   (jejeje--release-asset-url release-data))
@@ -251,7 +239,6 @@ Signals `user-error' if any step fails."
     ;; Clean up temp files.
     (ignore-errors (delete-file tmp-archive))
     (ignore-errors (delete-directory tmp-dir t))
-    (jejeje--write-cached-version version)
     (message "Jejeje: `je' %s installed at %s" version dest)
     dest))
 
@@ -271,10 +258,10 @@ This function blocks until the download completes."
 
 (defun jejeje--check-update-async ()
   "Asynchronously check for a newer `je' release and update in the background.
-Compares the cached version tag with the latest tag from the GitHub API.
-When a newer version is available, downloads and installs it silently.
+Compares the version reported by `je -V' with the latest tag from the GitHub
+API.  When a newer version is available, downloads and installs it silently.
 Intended to be called from `after-init-hook'."
-  (let ((cached (jejeje--cached-version)))
+  (let ((installed (jejeje--installed-version)))
     (url-retrieve
      jejeje--github-api-latest
      (lambda (status)
@@ -290,9 +277,14 @@ Intended to be called from `after-init-hook'."
                                :array-type  'vector))
                     (latest   (gethash "tag_name" release)))
                (kill-buffer (current-buffer))
-               (when (and latest (not (equal latest cached)))
-                 (message "Jejeje: updating `je' from %s to %s…"
-                          (or cached "none") latest)
+               ;; `je -V' outputs e.g. "je 0.1.0"; latest is e.g. "v0.1.0".
+               ;; Update when the latest tag version does not appear in the
+               ;; installed version string.
+               (when (and latest installed
+                          (not (string-match-p (regexp-quote
+                                                (string-remove-prefix "v" latest))
+                                               installed)))
+                 (message "Jejeje: updating `je' (%s → %s)…" installed latest)
                  (jejeje--download-and-install release)
                  ;; Refresh the executable path after update.
                  (setq jejeje-executable (jejeje--executable-path))))

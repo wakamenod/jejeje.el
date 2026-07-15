@@ -2071,28 +2071,60 @@ Each name is wrapped into a minimal asset hash-table with the keys
     (should-error (jejeje--release-asset-url release) :type 'user-error)))
 
 
-;;; ─── jejeje--cached-version / jejeje--write-cached-version ──────────────────
+;;; ─── jejeje--installed-version ───────────────────────────────────────────────
 
-(ert-deftest jejeje-cached-version/returns-nil-when-no-cache ()
-  "Returns nil when the version-cache file does not exist."
+(ert-deftest jejeje-installed-version/returns-nil-when-binary-missing ()
+  "Returns nil when the managed binary does not exist."
   (jejeje-test--with-temp-dir
     (let ((jejeje--executable-dir default-directory))
-      (should (null (jejeje--cached-version))))))
+      ;; No binary created — file-executable-p returns nil.
+      (should (null (jejeje--installed-version))))))
 
-(ert-deftest jejeje-cached-version/returns-written-version ()
-  "Returns the exact string written by `jejeje--write-cached-version'."
-  (jejeje-test--with-temp-dir
-    (let ((jejeje--executable-dir default-directory))
-      (jejeje--write-cached-version "v1.2.3")
-      (should (equal "v1.2.3" (jejeje--cached-version))))))
+;; Helper that normalises the BUFFER argument of `call-process' stubs.
+;; `call-process' accepts t (current buffer), a buffer object, or a string.
+(defmacro jejeje-test--with-mocked-call-process-output (output exit-code &rest body)
+  "Evaluate BODY with `call-process' stubbed to insert OUTPUT and return EXIT-CODE."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'call-process)
+              (lambda (_prog _in buffer _disp &rest _args)
+                (let ((target (cond ((eq buffer t)   (current-buffer))
+                                    ((bufferp buffer) buffer)
+                                    ((stringp buffer) (get-buffer-create buffer))
+                                    (t               (current-buffer)))))
+                  (with-current-buffer target (insert ,output)))
+                ,exit-code)))
+     ,@body))
 
-(ert-deftest jejeje-cached-version/strips-trailing-whitespace ()
-  "Trailing newlines in the cache file are stripped."
+(ert-deftest jejeje-installed-version/returns-output-of-je-dash-v ()
+  "Returns the trimmed stdout of `je -V' when the binary exists."
   (jejeje-test--with-temp-dir
     (let* ((jejeje--executable-dir default-directory)
-           (cache (expand-file-name jejeje--version-cache-file default-directory)))
-      (write-region "v0.5.0\n" nil cache)
-      (should (equal "v0.5.0" (jejeje--cached-version))))))
+           (bin (jejeje--executable-path)))
+      (write-region "" nil bin)
+      (set-file-modes bin #o755)
+      (jejeje-test--with-mocked-call-process-output "je 0.1.0\n" 0
+        (should (equal "je 0.1.0" (jejeje--installed-version)))))))
+
+(ert-deftest jejeje-installed-version/returns-nil-when-je-v-fails ()
+  "Returns nil when `je -V' exits non-zero (e.g. corrupt binary)."
+  (jejeje-test--with-temp-dir
+    (let* ((jejeje--executable-dir default-directory)
+           (bin (jejeje--executable-path)))
+      (write-region "" nil bin)
+      (set-file-modes bin #o755)
+      (cl-letf (((symbol-function 'call-process)
+                 (lambda (_prog _in _buf _disp &rest _args) 1)))
+        (should (null (jejeje--installed-version)))))))
+
+(ert-deftest jejeje-installed-version/strips-trailing-whitespace ()
+  "Trailing newlines in `je -V' output are stripped."
+  (jejeje-test--with-temp-dir
+    (let* ((jejeje--executable-dir default-directory)
+           (bin (jejeje--executable-path)))
+      (write-region "" nil bin)
+      (set-file-modes bin #o755)
+      (jejeje-test--with-mocked-call-process-output "je 0.2.0\n\n" 0
+        (should (equal "je 0.2.0" (jejeje--installed-version)))))))
 
 
 ;;; ─── jejeje--ensure-executable ───────────────────────────────────────────────
