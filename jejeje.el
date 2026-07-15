@@ -270,7 +270,7 @@ Intended to be called from `after-init-hook'."
            (kill-buffer (current-buffer))
          (goto-char (point-min))
          (re-search-forward "^\r?\n" nil t)
-         (condition-case _err
+         (condition-case err
              (let* ((release  (json-parse-string
                                (buffer-substring-no-properties (point) (point-max))
                                :object-type 'hash-table
@@ -287,9 +287,11 @@ Intended to be called from `after-init-hook'."
                  (message "Jejeje: updating `je' (%s → %s)…" installed latest)
                  (jejeje--download-and-install release)
                  ;; Refresh the executable path after update.
-                 (setq jejeje-executable (jejeje--executable-path))))
+                 (setq jejeje-executable (jejeje--executable-path))
+                 (message "Jejeje: `je' updated to %s" latest)))
            (error
-            ;; Parse errors during background update are silently swallowed.
+            (message "Jejeje: background update failed: %s"
+                     (error-message-string err))
             (kill-buffer (current-buffer))))))
      nil t t)))
 
