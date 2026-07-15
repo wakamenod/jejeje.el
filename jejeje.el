@@ -260,15 +260,17 @@ This function blocks until the download completes."
   "Asynchronously check for a newer `je' release and update in the background.
 Compares the version reported by `je -V' with the latest tag from the GitHub
 API.  When a newer version is available, downloads and installs it silently.
-Scheduled via `run-with-idle-timer' at package load time so that it fires
-regardless of whether the package is loaded eagerly or lazily."
+Scheduled via `run-with-idle-timer' at package load time."
   (let ((installed (jejeje--installed-version)))
+    (message "Jejeje: update check started (installed: %s)" (or installed "none"))
     (url-retrieve
      jejeje--github-api-latest
      (lambda (status)
        (if (plist-get status :error)
-           ;; Network errors are silently ignored in the background check.
-           (kill-buffer (current-buffer))
+           (progn
+             (message "Jejeje: update check network error: %s"
+                      (plist-get status :error))
+             (kill-buffer (current-buffer)))
          (goto-char (point-min))
          (re-search-forward "^\r?\n" nil t)
          (condition-case err
@@ -278,20 +280,18 @@ regardless of whether the package is loaded eagerly or lazily."
                                :array-type  'array))
                     (latest   (gethash "tag_name" release)))
                (kill-buffer (current-buffer))
-               ;; `je -V' outputs e.g. "je 0.1.0"; latest is e.g. "v0.1.0".
-               ;; Update when the latest tag version does not appear in the
-               ;; installed version string.
-               (when (and latest installed
-                          (not (string-match-p (regexp-quote
-                                                (string-remove-prefix "v" latest))
-                                               installed)))
-                 (message "Jejeje: updating `je' (%s → %s)…" installed latest)
-                 (jejeje--download-and-install release)
-                 ;; Refresh the executable path after update.
-                 (setq jejeje-executable (jejeje--executable-path))
-                 (message "Jejeje: `je' updated to %s" latest)))
+               (if (and latest installed
+                        (not (string-match-p (regexp-quote
+                                              (string-remove-prefix "v" latest))
+                                             installed)))
+                   (progn
+                     (message "Jejeje: updating `je' (%s → %s)…" installed latest)
+                     (jejeje--download-and-install release)
+                     (setq jejeje-executable (jejeje--executable-path))
+                     (message "Jejeje: `je' updated to %s" latest))
+                 (message "Jejeje: `je' is up to date (%s)" (or installed "not installed"))))
            (error
-            (message "Jejeje: background update failed: %s"
+            (message "Jejeje: update check parse error: %s"
                      (error-message-string err))
             (kill-buffer (current-buffer))))))
      nil t t)))
