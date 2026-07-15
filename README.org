@@ -22,11 +22,52 @@ Supported online judges via the ~je~ tool:
 * Prerequisites
 
 - *Emacs*: version 28.1 or higher.
-- *~je~ CLI tool*: Must be installed and accessible via your ~exec-path~ or ~PATH~.
+- *~je~ CLI tool*: Downloaded and managed automatically by ~jejeje.el~.  No manual installation is required — see [[*Automatic ~je~ CLI management][Automatic ~je~ CLI management]] for details.
 - *transient*: version 0.4.0 or higher (automatically resolved via package managers).
 - *quickrun*: version 2.3 or higher (automatically resolved via package managers).  Used to detect the compile/run command from the buffer's file type.
 - *posframe* /(optional)/: When installed, ~jejeje-test~ displays results in a floating child-frame instead of an ordinary buffer window.  Install via your package manager (e.g. ~M-x package-install RET posframe~) and set ~jejeje-test-display-method~ to ~'posframe~ (the default) to enable it.
 - *xwidgets* /(optional, required for ~jejeje-submit~)/: ~jejeje-submit~ injects JavaScript into a live browser session via Emacs's built-in ~xwidget-webkit~ support.  This requires Emacs to have been built with ~--with-xwidgets~ (check with ~(featurep 'xwidget-internal)~).  On macOS, [[https://github.com/d12frosted/homebrew-emacs-plus][emacs-plus]] supports this out of the box.
+
+* Automatic ~je~ CLI management
+
+~jejeje.el~ manages the ~je~ binary for you.  You do not need to install it manually.
+
+** First run
+
+The first time any ~jejeje~ command is invoked (e.g. ~jejeje-prepare~, ~jejeje-test~), the package:
+
+1. Queries the [[https://api.github.com/repos/wakamenod/jejeje/releases/latest][GitHub Releases API]] to find the latest release.
+2. Downloads the appropriate pre-built archive for your OS:
+   - macOS → ~je-vX.Y.Z-macos-universal.tar.gz~
+   - Linux → ~je-vX.Y.Z-linux-x86_64.tar.gz~
+   - Windows → ~je-vX.Y.Z-windows-x86_64.zip~
+3. Extracts the ~je~ binary and places it at ~<user-emacs-directory>/jejeje/je~.
+4. Sets ~jejeje-executable~ to that absolute path for the current session.
+
+The download happens synchronously (blocking) so the command you issued runs immediately after the binary is ready.
+
+** Automatic background updates
+
+Each time Emacs starts, ~jejeje.el~ asynchronously checks whether a newer release is available.  If a newer version is found, it is downloaded and installed silently in the background — no interruption to your editing session.
+
+** Manual update
+
+Force an update by deleting ~<user-emacs-directory>/jejeje/version~ and restarting Emacs or invoking any ~jejeje~ command.  A dedicated ~M-x jejeje-update-executable~ command is planned for a future release.
+
+** Binary location
+
+The managed binary lives at:
+
+#+begin_src text
+~/.emacs.d/jejeje/je        ; Unix
+~/.emacs.d/jejeje/je.exe    ; Windows
+#+end_src
+
+A version-cache file at ~<user-emacs-directory>/jejeje/version~ records the installed tag (e.g. ~v0.1.0~) and is used to detect when an update is available.
+
+** Using a custom ~je~ binary
+
+The automatic download always targets the managed location (~<user-emacs-directory>/jejeje/je~).  If you prefer to use a separately installed binary (e.g. one built from source via Cargo), copy or symlink it to that location and the download step will be skipped automatically on the next invocation.
 
 * Installation
 
@@ -86,7 +127,10 @@ If you use ~el-get~ as the package backend for ~leaf~:
 You can customize the behavior of ~jejeje.el~ using ~M-x customize-group RET jejeje~ or by setting variables directly:
 
 #+begin_src elisp
-(setq jejeje-executable "je")          ; Path or name of the `je` executable
+;; jejeje-executable is managed automatically; set only to override with a
+;; pre-installed binary (e.g. a locally built development build).
+(setq jejeje-executable "/usr/local/bin/je")
+
 (setq jejeje-test-command nil)         ; nil = auto-detect via quickrun (default)
                                        ; Set to e.g. "./a.out" to pin a fixed command
 (setq jejeje-test-tle 2.0)             ; Default time-limit in seconds

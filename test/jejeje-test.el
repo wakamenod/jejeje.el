@@ -734,12 +734,15 @@ without killing the buffer."
 (defmacro jejeje-test--with-mocked-run (&rest body)
   "Evaluate BODY with the process-spawning internals stubbed out.
 `jejeje--auto-command' returns a no-compile Python invocation;
-`jejeje--run' is a no-op."
+`jejeje--run' is a no-op.
+`jejeje--ensure-executable' is also stubbed out so no network call is made."
   (declare (indent 0))
   `(cl-letf (((symbol-function 'jejeje--auto-command)
               (lambda () (cons nil "python /tmp/sol.py")))
              ((symbol-function 'jejeje--run)
-              (lambda (_args _buf &optional _sentinel) nil)))
+              (lambda (_args _buf &optional _sentinel) nil))
+             ((symbol-function 'jejeje--ensure-executable)
+              (lambda () jejeje-executable)))
      ,@body))
 
 (ert-deftest jejeje-test/skips-show-when-buffer-already-visible ()
@@ -1273,15 +1276,20 @@ Inside BODY the following dynamic variables are available:
 
 ;; Helper: mock `jejeje--get-template-dir' to return a fixed path.
 (defmacro jejeje-test--with-template-dir (dir &rest body)
-  "Evaluate BODY with `jejeje--get-template-dir' stubbed to return DIR."
+  "Evaluate BODY with `jejeje--get-template-dir' and `jejeje--ensure-executable'
+stubbed out so no real binary or network access occurs."
   (declare (indent 1))
   `(cl-letf (((symbol-function 'jejeje--get-template-dir)
-              (lambda () ,dir)))
+              (lambda () ,dir))
+             ((symbol-function 'jejeje--ensure-executable)
+              (lambda () jejeje-executable)))
      ,@body))
 
 (ert-deftest jejeje-template/signals-error-when-template-dir-empty ()
   "Signals `user-error' when `je config template_dir' is not configured."
-  (cl-letf (((symbol-function 'jejeje--get-template-dir)
+  (cl-letf (((symbol-function 'jejeje--ensure-executable)
+             (lambda () jejeje-executable))
+            ((symbol-function 'jejeje--get-template-dir)
              (lambda ()
                (user-error "jejeje: template_dir is not set — run `je config template_dir <path>'"))))
     (should-error (jejeje-template) :type 'user-error)))
@@ -1990,6 +1998,161 @@ jejeje-test--js-calls collects calls in push order (newest-first), so:
     (should (string-match-p "scrollTo" (nth 1 jejeje-test--js-calls)))
     ;; index 0 must contain ace.edit (set-code step)
     (should (string-match-p "ace\\.edit" (nth 0 jejeje-test--js-calls)))))
+
+;;; ─── jejeje--release-asset-url ───────────────────────────────────────────────
+;;
+;; Build a minimal fake release-data hash-table that mirrors the real GitHub
+;; API response structure used by `jejeje--release-asset-url'.
+
+(defun jejeje-test--make-release-data (&rest asset-names)
+  "Return a fake release hash-table whose assets vector contains ASSET-NAMES.
+Each name is wrapped into a minimal asset hash-table with the keys
+\\='name\\=' and \\='browser_download_url\\='."
+  (let ((release (make-hash-table :test #'equal)))
+    (puthash "tag_name" "v9.9.9" release)
+    (puthash "assets"
+             (vconcat
+              (mapcar (lambda (name)
+                        (let ((a (make-hash-table :test #'equal)))
+                          (puthash "name" name a)
+                          (puthash "browser_download_url"
+                                   (format "https://example.com/%s" name) a)
+                          a))
+                      asset-names))
+             release)
+    release))
+
+(defconst jejeje-test--fake-release-data
+  (jejeje-test--make-release-data
+   "je-v9.9.9-linux-x86_64.tar.gz"
+   "je-v9.9.9-macos-universal.tar.gz"
+   "je-v9.9.9-windows-x86_64.zip")
+  "Fake release-data hash-table used across asset-URL tests.")
+
+(ert-deftest jejeje-release-asset-url/darwin-picks-macos-universal ()
+  "On macOS (darwin), the macos-universal asset URL is returned."
+  (let ((system-type 'darwin))
+    (should (string-match-p "macos-universal"
+                            (jejeje--release-asset-url
+                             jejeje-test--fake-release-data)))))
+
+(ert-deftest jejeje-release-asset-url/linux-picks-x86_64 ()
+  "On GNU/Linux, the linux-x86_64 asset URL is returned."
+  (let ((system-type 'gnu/linux))
+    (should (string-match-p "linux-x86_64"
+                            (jejeje--release-asset-url
+                             jejeje-test--fake-release-data)))))
+
+(ert-deftest jejeje-release-asset-url/windows-picks-windows-x86_64 ()
+  "On Windows NT, the windows-x86_64 asset URL is returned."
+  (let ((system-type 'windows-nt))
+    (should (string-match-p "windows-x86_64"
+                            (jejeje--release-asset-url
+                             jejeje-test--fake-release-data)))))
+
+(ert-deftest jejeje-release-asset-url/returns-full-url ()
+  "The returned URL begins with https://."
+  (let ((system-type 'darwin))
+    (should (string-prefix-p "https://"
+                             (jejeje--release-asset-url
+                              jejeje-test--fake-release-data)))))
+
+(ert-deftest jejeje-release-asset-url/unsupported-os-signals-user-error ()
+  "An unknown `system-type' value signals `user-error'."
+  (let ((system-type 'haiku))
+    (should-error (jejeje--release-asset-url jejeje-test--fake-release-data)
+                  :type 'user-error)))
+
+(ert-deftest jejeje-release-asset-url/missing-asset-signals-user-error ()
+  "Signals `user-error' when no asset matches the current OS."
+  (let* ((system-type 'darwin)
+         ;; Release that only has the Linux asset.
+         (release (jejeje-test--make-release-data "je-v9.9.9-linux-x86_64.tar.gz")))
+    (should-error (jejeje--release-asset-url release) :type 'user-error)))
+
+
+;;; ─── jejeje--cached-version / jejeje--write-cached-version ──────────────────
+
+(ert-deftest jejeje-cached-version/returns-nil-when-no-cache ()
+  "Returns nil when the version-cache file does not exist."
+  (jejeje-test--with-temp-dir
+    (let ((jejeje--executable-dir default-directory))
+      (should (null (jejeje--cached-version))))))
+
+(ert-deftest jejeje-cached-version/returns-written-version ()
+  "Returns the exact string written by `jejeje--write-cached-version'."
+  (jejeje-test--with-temp-dir
+    (let ((jejeje--executable-dir default-directory))
+      (jejeje--write-cached-version "v1.2.3")
+      (should (equal "v1.2.3" (jejeje--cached-version))))))
+
+(ert-deftest jejeje-cached-version/strips-trailing-whitespace ()
+  "Trailing newlines in the cache file are stripped."
+  (jejeje-test--with-temp-dir
+    (let* ((jejeje--executable-dir default-directory)
+           (cache (expand-file-name jejeje--version-cache-file default-directory)))
+      (write-region "v0.5.0\n" nil cache)
+      (should (equal "v0.5.0" (jejeje--cached-version))))))
+
+
+;;; ─── jejeje--ensure-executable ───────────────────────────────────────────────
+
+(ert-deftest jejeje-ensure-executable/skips-download-when-binary-exists ()
+  "Does NOT call `jejeje--download-and-install' when the binary is already present."
+  (jejeje-test--with-temp-dir
+    (let* ((jejeje--executable-dir default-directory)
+           (bin (jejeje--executable-path)))
+      ;; Create a dummy executable file.
+      (write-region "" nil bin)
+      (set-file-modes bin #o755)
+      (let (download-called)
+        (cl-letf (((symbol-function 'jejeje--download-and-install)
+                   (lambda (_r) (setq download-called t) bin))
+                  ((symbol-function 'jejeje--fetch-latest-release)
+                   (lambda () (error "should not be called"))))
+          (jejeje--ensure-executable)
+          (should-not download-called))))))
+
+(ert-deftest jejeje-ensure-executable/calls-download-when-binary-missing ()
+  "Calls `jejeje--fetch-latest-release' and `jejeje--download-and-install'
+when the `je' binary does not exist."
+  (jejeje-test--with-temp-dir
+    (let* ((jejeje--executable-dir default-directory)
+           (bin (jejeje--executable-path))
+           download-called)
+      ;; Binary must NOT exist.
+      (when (file-exists-p bin) (delete-file bin))
+      (cl-letf (((symbol-function 'jejeje--fetch-latest-release)
+                 (lambda () jejeje-test--fake-release-data))
+                ((symbol-function 'jejeje--download-and-install)
+                 (lambda (_r)
+                   (setq download-called t)
+                   ;; Simulate the installer creating the file.
+                   (write-region "" nil bin)
+                   (set-file-modes bin #o755)
+                   bin)))
+        (jejeje--ensure-executable)
+        (should download-called)))))
+
+(ert-deftest jejeje-ensure-executable/sets-jejeje-executable-to-absolute-path ()
+  "After running, `jejeje-executable' is set to the absolute managed path."
+  (jejeje-test--with-temp-dir
+    (let* ((jejeje--executable-dir default-directory)
+           (bin (jejeje--executable-path))
+           (original-executable jejeje-executable))
+      (write-region "" nil bin)
+      (set-file-modes bin #o755)
+      (cl-letf (((symbol-function 'jejeje--fetch-latest-release)
+                 (lambda () jejeje-test--fake-release-data))
+                ((symbol-function 'jejeje--download-and-install)
+                 (lambda (_r) bin)))
+        (unwind-protect
+            (progn
+              (jejeje--ensure-executable)
+              (should (equal bin jejeje-executable)))
+          ;; Restore the original value so other tests are not affected.
+          (setq jejeje-executable original-executable))))))
+
 
 (provide 'jejeje-test)
 ;;; jejeje-test.el ends here

@@ -50,6 +50,7 @@
 (require 'json)
 (require 'transient)
 (require 'quickrun)
+(require 'url)
 
 
 ;;; ─── Customisation ────────────────────────────────────────────────────────────
@@ -121,6 +122,186 @@ Customise this when the default guesses do not match your preferred dialect."
 
 (defvar jejeje--posframe-buffer " *jejeje-posframe*"
   "Name of the hidden posframe buffer used to host test-result frames.")
+
+
+;;; ─── Auto-install: `je' binary management ────────────────────────────────────
+
+(defvar jejeje--executable-dir
+  (locate-user-emacs-file "jejeje/")
+  "Directory under `user-emacs-directory' where the downloaded `je' binary lives.
+The default resolves to the \"jejeje/\" subdirectory of `user-emacs-directory'.")
+
+(defconst jejeje--github-api-latest
+  "https://api.github.com/repos/wakamenod/jejeje/releases/latest"
+  "GitHub API endpoint that returns the latest jejeje release metadata.")
+
+(defconst jejeje--version-cache-file "version"
+  "File name relative to `jejeje--executable-dir' caching the installed version.")
+
+(defun jejeje--executable-path ()
+  "Return the absolute path to the managed `je' binary.
+On Windows the binary is named `je.exe'; elsewhere `je'."
+  (expand-file-name
+   (if (eq system-type 'windows-nt) "je.exe" "je")
+   jejeje--executable-dir))
+
+(defun jejeje--cached-version ()
+  "Return the version string stored in the version-cache file, or nil.
+The cache file lives at `jejeje--executable-dir'/`jejeje--version-cache-file'."
+  (let ((cache (expand-file-name jejeje--version-cache-file
+                                 jejeje--executable-dir)))
+    (when (file-readable-p cache)
+      (string-trim (with-temp-buffer
+                     (insert-file-contents cache)
+                     (buffer-string))))))
+
+(defun jejeje--write-cached-version (version)
+  "Persist VERSION string into the version-cache file.
+Creates `jejeje--executable-dir' if it does not yet exist."
+  (make-directory jejeje--executable-dir t)
+  (write-region version nil
+                (expand-file-name jejeje--version-cache-file
+                                  jejeje--executable-dir)))
+
+(defun jejeje--release-asset-url (release-data)
+  "Return the download URL for this OS from RELEASE-DATA (a parsed JSON object).
+RELEASE-DATA must be a hash-table as returned by `json-parse-string'.
+Selects the asset whose name matches the current OS:
+  darwin      → macos-universal
+  gnu/linux   → linux-x86_64
+  windows-nt  → windows-x86_64
+Signals `user-error' when no matching asset is found."
+  (let* ((os-key (pcase system-type
+                   ('darwin     "macos-universal")
+                   ('gnu/linux  "linux-x86_64")
+                   ('windows-nt "windows-x86_64")
+                   (_ (user-error "Jejeje: unsupported OS `%s'" system-type))))
+         (assets (gethash "assets" release-data))
+         (match  (catch 'found
+                   (seq-doseq (asset assets)
+                     (when (string-match-p os-key (gethash "name" asset ""))
+                       (throw 'found (gethash "browser_download_url" asset))))
+                   nil)))
+    (unless match
+      (user-error "Jejeje: no release asset found for OS `%s'" system-type))
+    match))
+
+(defun jejeje--fetch-latest-release ()
+  "Fetch and return the latest release metadata from GitHub as a hash-table.
+Uses `url-retrieve-synchronously'.  Signals `user-error' on HTTP/parse errors."
+  (let ((url-request-method "GET")
+        (url-request-extra-headers
+         '(("Accept" . "application/vnd.github.v3+json"))))
+    (with-current-buffer
+        (url-retrieve-synchronously jejeje--github-api-latest t t 10)
+      (goto-char (point-min))
+      ;; Skip HTTP response headers.
+      (re-search-forward "^\r?\n" nil t)
+      (condition-case err
+          (json-parse-string (buffer-substring-no-properties (point) (point-max))
+                             :object-type 'hash-table
+                             :array-type  'vector)
+        (error
+         (user-error "Jejeje: failed to parse GitHub API response: %s"
+                     (error-message-string err)))))))
+
+(defun jejeje--download-and-install (release-data)
+  "Download the `je' binary from RELEASE-DATA and install it.
+RELEASE-DATA is a hash-table as returned by `jejeje--fetch-latest-release'.
+Steps:
+  1. Resolve the correct asset URL for this OS.
+  2. Download the archive to a temporary file with `url-copy-file'.
+  3. Extract the binary with `tar' (Unix) or Expand-Archive (Windows PS).
+  4. Move the binary to `jejeje--executable-path' and make it executable.
+  5. Write the version tag to the cache file.
+Signals `user-error' if any step fails."
+  (let* ((version     (gethash "tag_name" release-data))
+         (asset-url   (jejeje--release-asset-url release-data))
+         (archive-ext (if (string-suffix-p ".zip" asset-url) "zip" "tar.gz"))
+         (tmp-archive (make-temp-file "jejeje-download-" nil
+                                      (concat "." archive-ext)))
+         (tmp-dir     (make-temp-file "jejeje-extract-" t))
+         (bin-name    (if (eq system-type 'windows-nt) "je.exe" "je"))
+         (dest        (jejeje--executable-path)))
+    (message "Jejeje: downloading `je' %s from GitHub…" version)
+    (condition-case err
+        (url-copy-file asset-url tmp-archive t)
+      (error
+       (user-error "Jejeje: download failed: %s" (error-message-string err))))
+    (message "Jejeje: extracting archive…")
+    (let ((exit-code
+           (if (eq system-type 'windows-nt)
+               (call-process "powershell" nil nil nil
+                             "-Command"
+                             (format "Expand-Archive -Path '%s' -DestinationPath '%s' -Force"
+                                     tmp-archive tmp-dir))
+             (call-process "tar" nil nil nil
+                           "-xzf" tmp-archive "-C" tmp-dir))))
+      (unless (= 0 exit-code)
+        (user-error "Jejeje: extraction failed (exit %d)" exit-code)))
+    ;; Find the binary inside the extracted tree.
+    (let* ((found (car (directory-files-recursively tmp-dir
+                                                    (concat "^" (regexp-quote bin-name) "$")))))
+      (unless found
+        (user-error "Jejeje: binary `%s' not found in extracted archive" bin-name))
+      (make-directory jejeje--executable-dir t)
+      (copy-file found dest t)
+      (unless (eq system-type 'windows-nt)
+        (set-file-modes dest #o755)))
+    ;; Clean up temp files.
+    (ignore-errors (delete-file tmp-archive))
+    (ignore-errors (delete-directory tmp-dir t))
+    (jejeje--write-cached-version version)
+    (message "Jejeje: `je' %s installed at %s" version dest)
+    dest))
+
+(defun jejeje--ensure-executable ()
+  "Ensure the `je' binary is available, downloading it if necessary.
+If the binary already exists at `jejeje--executable-path', return its path.
+Otherwise fetch the latest release from GitHub, install it, update
+`jejeje-executable' to the absolute path, and return that path.
+This function blocks until the download completes."
+  (let ((path (jejeje--executable-path)))
+    (unless (file-executable-p path)
+      (let ((release (jejeje--fetch-latest-release)))
+        (jejeje--download-and-install release)))
+    ;; Always point `jejeje-executable' at the managed binary path.
+    (setq jejeje-executable path)
+    path))
+
+(defun jejeje--check-update-async ()
+  "Asynchronously check for a newer `je' release and update in the background.
+Compares the cached version tag with the latest tag from the GitHub API.
+When a newer version is available, downloads and installs it silently.
+Intended to be called from `after-init-hook'."
+  (let ((cached (jejeje--cached-version)))
+    (url-retrieve
+     jejeje--github-api-latest
+     (lambda (status)
+       (if (plist-get status :error)
+           ;; Network errors are silently ignored in the background check.
+           (kill-buffer (current-buffer))
+         (goto-char (point-min))
+         (re-search-forward "^\r?\n" nil t)
+         (condition-case _err
+             (let* ((release  (json-parse-string
+                               (buffer-substring-no-properties (point) (point-max))
+                               :object-type 'hash-table
+                               :array-type  'vector))
+                    (latest   (gethash "tag_name" release)))
+               (kill-buffer (current-buffer))
+               (when (and latest (not (equal latest cached)))
+                 (message "Jejeje: updating `je' from %s to %s…"
+                          (or cached "none") latest)
+                 (jejeje--download-and-install release)
+                 ;; Refresh the executable path after update.
+                 (setq jejeje-executable (jejeje--executable-path))))
+           (error
+            ;; Parse errors during background update are silently swallowed.
+            (kill-buffer (current-buffer))))))
+     nil t t)))
+
+(add-hook 'after-init-hook #'jejeje--check-update-async)
 
 
 ;;; ─── Internal utilities ───────────────────────────────────────────────────────
@@ -725,23 +906,25 @@ Provides syntax highlighting for AC, WA, TLE, RE, and SKIP verdicts."
 When called interactively, first select a judge, then pick a contest
 from the fetched list.  QUERY becomes the selected contest ID."
   (interactive
-   (let* ((judge (completing-read "Judge: "
-                                  '("atcoder" "codeforces" "yukicoder" "aoj")
-                                  nil t))
-          (_ (message "Jejeje: fetching %s contests …" judge))
-          (candidates (jejeje--fetch-contests judge))
-          (query
-           (if candidates
-               (let* ((choice (completing-read
-                                (format "Contest [%s]: " judge)
-                                candidates nil t))
-                      (id (cdr (assoc choice candidates))))
-                 (or id choice))
-             ;; Fallback: manual entry when fetch fails
-             (progn
-               (message "Jejeje: failed to fetch contest list — enter ID/URL manually")
-               (read-string "je prepare — URL / ID / query: ")))))
-     (list query)))
+   (progn
+     (jejeje--ensure-executable)
+     (let* ((judge (completing-read "Judge: "
+                                    '("atcoder" "codeforces" "yukicoder" "aoj")
+                                    nil t))
+            (_ (message "Jejeje: fetching %s contests …" judge))
+            (candidates (jejeje--fetch-contests judge))
+            (query
+             (if candidates
+                 (let* ((choice (completing-read
+                                  (format "Contest [%s]: " judge)
+                                  candidates nil t))
+                        (id (cdr (assoc choice candidates))))
+                   (or id choice))
+               ;; Fallback: manual entry when fetch fails
+               (progn
+                 (message "Jejeje: failed to fetch contest list — enter ID/URL manually")
+                 (read-string "je prepare — URL / ID / query: ")))))
+       (list query))))
   (let ((buf (jejeje--get-output-buffer)))
     (with-current-buffer buf
       (special-mode))
@@ -798,6 +981,7 @@ displayed in the minibuffer when the process finishes."
          (list cmd (intern method)))
      ;; No prefix: auto-detect command; display method resolved at runtime.
      (list (when jejeje-test-command jejeje-test-command) nil)))
+  (jejeje--ensure-executable)
   (let* ((auto        (unless command (jejeje--auto-command)))
          (cmd         (or (and (stringp command) (not (string-empty-p command)) command)
                           (cdr auto)
@@ -855,6 +1039,7 @@ set `jejeje-test-command' or install quickrun"))
   "Run `je info' and display contest metadata in the output buffer.
 Walks up from `default-directory' to find `.je-meta.json'."
   (interactive)
+  (jejeje--ensure-executable)
   (let ((buf (jejeje--get-output-buffer)))
     (with-current-buffer buf
       (special-mode))
@@ -1013,6 +1198,7 @@ If the current buffer is visiting a file and a file with the same base name
 exists in the template directory, open that file directly with `find-file'.
 Otherwise open the template directory itself with `dired'."
   (interactive)
+  (jejeje--ensure-executable)
   (let* ((template-dir (jejeje--get-template-dir))
          (base-name    (and buffer-file-name
                             (file-name-nondirectory buffer-file-name)))
