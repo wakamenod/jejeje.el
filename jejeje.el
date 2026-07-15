@@ -1208,6 +1208,9 @@ Otherwise open the template directory itself with `dired'."
                             (file-name-nondirectory buffer-file-name)))
          (candidate    (and base-name
                             (expand-file-name base-name template-dir))))
+    (unless (file-directory-p template-dir)
+      (make-directory template-dir t)
+      (message "Jejeje: created template directory %s" template-dir))
     (if (and candidate (file-regular-p candidate))
         (find-file candidate)
       (dired template-dir))))
