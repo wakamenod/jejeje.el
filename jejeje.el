@@ -260,7 +260,8 @@ This function blocks until the download completes."
   "Asynchronously check for a newer `je' release and update in the background.
 Compares the version reported by `je -V' with the latest tag from the GitHub
 API.  When a newer version is available, downloads and installs it silently.
-Intended to be called from `after-init-hook'."
+Scheduled via `run-with-idle-timer' at package load time so that it fires
+regardless of whether the package is loaded eagerly or lazily."
   (let ((installed (jejeje--installed-version)))
     (url-retrieve
      jejeje--github-api-latest
@@ -295,7 +296,7 @@ Intended to be called from `after-init-hook'."
             (kill-buffer (current-buffer))))))
      nil t t)))
 
-(add-hook 'after-init-hook #'jejeje--check-update-async)
+(run-with-idle-timer 3 nil #'jejeje--check-update-async)
 
 
 ;;; ─── Internal utilities ───────────────────────────────────────────────────────
