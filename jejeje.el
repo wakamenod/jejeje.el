@@ -1201,6 +1201,18 @@ Otherwise open the template directory itself with `dired'."
       (dired template-dir))))
 
 
+;;;###autoload
+(defun jejeje-version ()
+  "Display the version of the managed `je' binary in the minibuffer.
+Runs `je -V' and shows the output via `message'.
+Shows a notice instead when the binary has not been downloaded yet."
+  (interactive)
+  (let ((version (jejeje--installed-version)))
+    (if version
+        (message "%s" version)
+      (message "Jejeje: `je' binary not found — invoke any jejeje command to download it"))))
+
+
 ;;; ─── Transient menu ───────────────────────────────────────────────────────────
 
 (transient-define-prefix jejeje-menu ()
@@ -1214,6 +1226,8 @@ Otherwise open the template directory itself with `dired'."
     ("T" "Open template"    jejeje-template)]
    ["Test"
     ("t" "Run tests"        jejeje-test)]
+   ["Misc"
+    ("V" "Show je version"  jejeje-version)]
    ])
 
 
@@ -1228,6 +1242,7 @@ Otherwise open the template directory itself with `dired'."
     (define-key map (kbd "w") #'jejeje-browse-problem)
     (define-key map (kbd "s") #'jejeje-submit-problem)
     (define-key map (kbd "T") #'jejeje-template)
+    (define-key map (kbd "V") #'jejeje-version)
     (define-key map (kbd "m") #'jejeje-menu)
     map)
   "Prefix key map for jejeje commands.
