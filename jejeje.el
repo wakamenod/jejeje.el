@@ -145,12 +145,14 @@ On Windows the binary is named `je.exe'; elsewhere `je'."
 (defun jejeje--installed-version ()
   "Return the version string reported by the managed `je' binary, or nil.
 Runs `je -V' synchronously and returns the trimmed output (e.g. \"je 0.1.0\").
-Returns nil when the binary does not exist or the invocation fails."
+Returns nil when the binary does not exist or the invocation fails.
+Used only for display purposes (e.g. `jejeje-version')."
   (let ((path (jejeje--executable-path)))
     (when (file-executable-p path)
       (with-temp-buffer
         (when (= 0 (call-process path nil t nil "-V"))
           (string-trim (buffer-string)))))))
+
 
 (defun jejeje--release-asset-url (release-data)
   "Return the download URL for this OS from RELEASE-DATA (a parsed JSON object).
@@ -256,42 +258,49 @@ This function blocks until the download completes."
     (setq jejeje-executable path)
     path))
 
+(defun jejeje--perform-update (release-data)
+  "Download and install `je' from RELEASE-DATA outside any `url-retrieve' callback.
+Calling `url-copy-file' (used by `jejeje--download-and-install') from within
+a `url-retrieve' callback can corrupt the download due to nested use of the
+URL library.  This function is therefore always invoked via `run-with-timer'
+to ensure it runs in a fresh event-loop iteration."
+  (let ((latest (gethash "tag_name" release-data)))
+    (condition-case err
+        (progn
+          (jejeje--download-and-install release-data)
+          (setq jejeje-executable (jejeje--executable-path))
+          (message "Jejeje: `je' updated to %s" latest))
+      (error
+       (message "Jejeje: update failed: %s" (error-message-string err))))))
+
 (defun jejeje--check-update-async ()
   "Asynchronously check for a newer `je' release and update in the background.
 Compares the version reported by `je -V' with the latest tag from the GitHub
 API.  When a newer version is available, downloads and installs it silently.
 Scheduled via `run-with-idle-timer' at package load time."
   (let ((installed (jejeje--installed-version)))
-    (message "Jejeje: update check started (installed: %s)" (or installed "none"))
     (url-retrieve
      jejeje--github-api-latest
      (lambda (status)
        (if (plist-get status :error)
-           (progn
-             (message "Jejeje: update check network error: %s"
-                      (plist-get status :error))
-             (kill-buffer (current-buffer)))
+           (kill-buffer (current-buffer))
          (goto-char (point-min))
          (re-search-forward "^\r?\n" nil t)
          (condition-case err
-             (let* ((release  (json-parse-string
-                               (buffer-substring-no-properties (point) (point-max))
-                               :object-type 'hash-table
-                               :array-type  'array))
-                    (latest   (gethash "tag_name" release)))
+             (let* ((release (json-parse-string
+                              (buffer-substring-no-properties (point) (point-max))
+                              :object-type 'hash-table
+                              :array-type  'array))
+                    (latest  (gethash "tag_name" release)))
                (kill-buffer (current-buffer))
-               (if (and latest installed
-                        (not (string-match-p (regexp-quote
-                                              (string-remove-prefix "v" latest))
-                                             installed)))
-                   (progn
-                     (message "Jejeje: updating `je' (%s → %s)…" installed latest)
-                     (jejeje--download-and-install release)
-                     (setq jejeje-executable (jejeje--executable-path))
-                     (message "Jejeje: `je' updated to %s" latest))
-                 (message "Jejeje: `je' is up to date (%s)" (or installed "not installed"))))
+               (when (and latest installed
+                          (not (string-match-p (regexp-quote
+                                                (string-remove-prefix "v" latest))
+                                               installed)))
+                 (message "Jejeje: updating `je' (%s → %s)…" installed latest)
+                 (run-with-timer 0 nil #'jejeje--perform-update release)))
            (error
-            (message "Jejeje: update check parse error: %s"
+            (message "Jejeje: update check failed: %s"
                      (error-message-string err))
             (kill-buffer (current-buffer))))))
      nil t t)))
