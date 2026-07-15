@@ -609,9 +609,15 @@ Signals `user-error' when the command fails or returns an empty value."
         (format
          "(function(){ace.edit('editor').setValue(%s,-1);})();"
          (jejeje--js-string code)))
-     ;; JS: scroll to the bottom of the page so the submit button is visible
+     ;; JS: scroll so the code editor is visible near the top of the viewport
      :scroll-js
-     "window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});")
+     ,(concat "(function(){"
+              "var el=document.getElementById('editor');"
+              "var top=el"
+              "?el.getBoundingClientRect().top+window.scrollY-80"
+              ":document.body.scrollHeight-200;"
+              "window.scrollTo({top:top,behavior:'smooth'});"
+              "})();"))
     ("codeforces\\.com"
      ;; JS evaluated in the page; must return a JSON array of
      ;; [{value:"<option-value>", text:"<display-label>"}, …]
@@ -715,9 +721,15 @@ Signals `user-error' when the command fails or returns an empty value."
                  "})();")
          (jejeje--js-string code)
          (jejeje--js-string code)))
-     ;; JS: scroll to the bottom of the page so the submit button is visible
+     ;; JS: scroll so the code editor is visible near the top of the viewport
      :scroll-js
-     "window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});")
+     ,(concat "(function(){"
+              "var el=document.getElementById('rich_source');"
+              "var top=el"
+              "?el.getBoundingClientRect().top+window.scrollY-80"
+              ":document.body.scrollHeight-200;"
+              "window.scrollTo({top:top,behavior:'smooth'});"
+              "})();"))
     ("onlinejudge\\.u-aizu\\.ac\\.jp"
      ;; AOJ uses Element UI <el-select> — a custom Vue/element component that
      ;; renders language options as <li class="el-select-dropdown__item">.
@@ -755,9 +767,15 @@ Signals `user-error' when the command fails or returns an empty value."
         (format
          "(function(){ace.edit('editor').setValue(%s,-1);})();"
          (jejeje--js-string code)))
-     ;; JS: scroll to the bottom of the page so the submit button is visible
+     ;; JS: scroll so the code editor is visible near the top of the viewport
      :scroll-js
-     "window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});"))
+     ,(concat "(function(){"
+              "var el=document.getElementById('editor');"
+              "var top=el"
+              "?el.getBoundingClientRect().top+window.scrollY-80"
+              ":document.body.scrollHeight-200;"
+              "window.scrollTo({top:top,behavior:'smooth'});"
+              "})();")))
   "Alist of (URL-REGEXP . PLIST) entries for judge-specific submit behaviour.
 
 Each entry maps a URL regexp to a property list with keys:

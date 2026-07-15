@@ -1022,10 +1022,11 @@ is installed and `jejeje-test-display-method' is \\='posframe."
   (let ((js (plist-get (jejeje-test--atcoder-backend) :scroll-js)))
     (should (string-match-p "scrollTo" js))))
 
-(ert-deftest jejeje-atcoder-backend/scroll-js-scrolls-to-bottom ()
-  ":scroll-js targets document.body.scrollHeight."
+(ert-deftest jejeje-atcoder-backend/scroll-js-targets-editor-element ()
+  ":scroll-js scrolls to the #editor element position, not the page bottom."
   (let ((js (plist-get (jejeje-test--atcoder-backend) :scroll-js)))
-    (should (string-match-p "document\\.body\\.scrollHeight" js))))
+    (should (string-match-p "getElementById" js))
+    (should (string-match-p "getBoundingClientRect" js))))
 
 (ert-deftest jejeje-codeforces-backend/no-scroll-js ()
   "Codeforces backend does not define :scroll-js (redirect handles navigation)."
