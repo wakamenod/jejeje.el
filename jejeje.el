@@ -189,7 +189,7 @@ Uses `url-retrieve-synchronously'.  Signals `user-error' on HTTP/parse errors."
       (condition-case err
           (json-parse-string (buffer-substring-no-properties (point) (point-max))
                              :object-type 'hash-table
-                             :array-type  'vector)
+                             :array-type  'array)
         (error
          (user-error "Jejeje: failed to parse GitHub API response: %s"
                      (error-message-string err)))))))
@@ -274,7 +274,7 @@ Intended to be called from `after-init-hook'."
              (let* ((release  (json-parse-string
                                (buffer-substring-no-properties (point) (point-max))
                                :object-type 'hash-table
-                               :array-type  'vector))
+                               :array-type  'array))
                     (latest   (gethash "tag_name" release)))
                (kill-buffer (current-buffer))
                ;; `je -V' outputs e.g. "je 0.1.0"; latest is e.g. "v0.1.0".
