@@ -1,80 +1,28 @@
 #+TITLE: jejeje.el
 
-Emacs interface for the [[https://github.com/wakamenod/jejeje][jejeje]] competitive programming CLI tool.
-
-~jejeje.el~ provides a seamless Emacs integration for the ~je~ command-line tool, a competitive programming helper written in Rust. It allows you to fetch problem samples, run tests against your solutions, and manage configurations directly within Emacs.
-
-Supported online judges via the ~je~ tool:
-- AtCoder
-- Codeforces
-- yukicoder
-- AOJ (Aizu Online Judge)
+Emacs interface for the [[https://github.com/wakamenod/jejeje][jejeje]] competitive programming CLI tool (~je~), supporting AtCoder, Codeforces, yukicoder, and AOJ.
 
 * Features
 
-- *~jejeje-prepare~*: Interactively select a judge and contest from a fetched list, then fetch problem samples.
-- *~jejeje-test~*: Run test cases against your solution with syntax-highlighted results (~jejeje-test-mode~).  The run command is derived automatically from the current buffer's file type via [[https://github.com/emacsorphanage/quickrun][quickrun]] (no prompt needed).  Results are displayed in a floating child-frame via [[https://github.com/tumashu/posframe][posframe]] when it is installed; if the output buffer is already visible in a window it is reused instead.  Use ~C-u~ to choose the display method (posframe / buffer) and override the run command for a single invocation.
-- *~jejeje-submit~*: Submit the current buffer's code from within a live ~xwidget-webkit~ browser session.  Detects the judge from the URL currently open in the xwidget window, prompts for the target language (pre-filtered by file extension), and injects the language choice and source code directly into the page's editor widget via JavaScript — the submit button is intentionally left for the user to press, allowing Cloudflare Turnstile verification when required.  See [[*Submitting solutions][Submitting solutions]] for per-judge details.
+- *~jejeje-prepare~*: Select a judge and contest interactively, then fetch problem samples.
+- *~jejeje-test~*: Run test cases against your solution with syntax-highlighted results. The run command is derived automatically via [[https://github.com/emacsorphanage/quickrun][quickrun]]. Use ~C-u~ to override the command or display method for a single invocation.
+- *~jejeje-submit~*: Inject language and source code into the submit form of a live ~xwidget-webkit~ session. Press the submit button manually to finalize.
 - *~jejeje-info~*: Display contest metadata from ~.je-meta.json~.
-- *~jejeje-browse-problem~*: Open the current problem's web page inside Emacs.  Reads ~.je-meta.json~ from the nearest ancestor directory and matches the current directory name (e.g. ~a~, ~b~) against the task list.  Uses ~xwidget-webkit-browse-url~ when available, falling back to ~browse-url~.
-- *~jejeje-menu~*: A convenient, interactive [[https://github.com/magit/transient][Transient]] popup menu for all commands.
+- *~jejeje-browse-problem~*: Open the current problem's web page inside Emacs.
+- *~jejeje-menu~*: [[https://github.com/magit/transient][Transient]] popup menu for all commands.
 
 * Prerequisites
 
-- *Emacs*: version 28.1 or higher.
-- *~je~ CLI tool*: Downloaded and managed automatically by ~jejeje.el~.  No manual installation is required — see [[*Automatic ~je~ CLI management][Automatic ~je~ CLI management]] for details.
-- *transient*: version 0.4.0 or higher (automatically resolved via package managers).
-- *quickrun*: version 2.3 or higher (automatically resolved via package managers).  Used to detect the compile/run command from the buffer's file type.
-- *posframe* /(optional)/: When installed, ~jejeje-test~ displays results in a floating child-frame instead of an ordinary buffer window.  Install via your package manager (e.g. ~M-x package-install RET posframe~) and set ~jejeje-test-display-method~ to ~'posframe~ (the default) to enable it.
-- *xwidgets* /(optional, required for ~jejeje-submit~)/: ~jejeje-submit~ injects JavaScript into a live browser session via Emacs's built-in ~xwidget-webkit~ support.  This requires Emacs to have been built with ~--with-xwidgets~ (check with ~(featurep 'xwidget-internal)~).  On macOS, [[https://github.com/d12frosted/homebrew-emacs-plus][emacs-plus]] supports this out of the box.
-
-* Automatic ~je~ CLI management
-
-~jejeje.el~ manages the ~je~ binary for you.  You do not need to install it manually.
-
-** First run
-
-The first time any ~jejeje~ command is invoked (e.g. ~jejeje-prepare~, ~jejeje-test~), the package:
-
-1. Queries the [[https://api.github.com/repos/wakamenod/jejeje/releases/latest][GitHub Releases API]] to find the latest release.
-2. Downloads the appropriate pre-built archive for your OS:
-   - macOS → ~je-vX.Y.Z-macos-universal.tar.gz~
-   - Linux → ~je-vX.Y.Z-linux-x86_64.tar.gz~
-   - Windows → ~je-vX.Y.Z-windows-x86_64.zip~
-3. Extracts the ~je~ binary and places it at ~<user-emacs-directory>/jejeje/je~.
-4. Sets ~jejeje-executable~ to that absolute path for the current session.
-
-The download happens synchronously (blocking) so the command you issued runs immediately after the binary is ready.
-
-** Automatic background updates
-
-Each time Emacs starts, ~jejeje.el~ asynchronously checks whether a newer release is available by comparing the output of ~je -V~ with the latest tag on GitHub.  If a newer version is found, it is downloaded and installed silently in the background — no interruption to your editing session.
-
-** Manual update
-
-A dedicated ~M-x jejeje-update-executable~ command is planned for a future release.  In the meantime, force an update by deleting the managed binary and restarting Emacs or invoking any ~jejeje~ command.
-
-** Binary location
-
-The managed binary lives at:
-
-#+begin_src text
-~/.emacs.d/jejeje/je        ; Unix
-~/.emacs.d/jejeje/je.exe    ; Windows
-#+end_src
-
-** Using a custom ~je~ binary
-
-The automatic download always targets the managed location (~<user-emacs-directory>/jejeje/je~).  If you prefer to use a separately installed binary (e.g. one built from source via Cargo), copy or symlink it to that location and the download step will be skipped automatically on the next invocation.
+- *Emacs* 28.1+
+- *~je~ CLI*: Managed automatically — downloaded on first use, updated silently in the background each startup. No manual installation needed.
+- *transient* 0.4.0+ (auto-resolved)
+- *quickrun* 2.3+ (auto-resolved)
+- *posframe* /(optional)/: Floating child-frame display for ~jejeje-test~.
+- *xwidgets* /(optional, required for ~jejeje-submit~)/: Emacs must be built with ~--with-xwidgets~. On macOS, [[https://github.com/d12frosted/homebrew-emacs-plus][emacs-plus]] supports this out of the box.
 
 * Installation
 
-Since ~jejeje.el~ is not hosted on official package repositories like MELPA yet, you can install it directly from GitHub using modern package managers or setup macros.
-
-** Using ~use-package~
-
-*** Emacs 29+ (Built-in ~package-vc~)
-If you are using Emacs 29 or later, you can leverage the built-in ~package-vc~ support within ~use-package~:
+** Emacs 29+ (~package-vc~)
 
 #+begin_src elisp
 (use-package jejeje
@@ -82,212 +30,55 @@ If you are using Emacs 29 or later, you can leverage the built-in ~package-vc~ s
   :bind (("C-c j" . jejeje-menu)))
 #+end_src
 
-*** With ~straight.el~
-If your ~use-package~ is backed by ~straight.el~:
+** With ~straight.el~
 
 #+begin_src elisp
 (use-package jejeje
   :straight (jejeje :type git :host github :repo "wakamenod/jejeje.el")
-  :bind (("C-c j" . jejeje-menu)))
-#+end_src
-
-** Using ~leaf~
-
-*** Emacs 29+ (Built-in ~package-vc~)
-Recommended for Emacs 29+ without external package manager extensions:
-
-#+begin_src elisp
-(leaf jejeje
-  :vc (:url "https://github.com/wakamenod/jejeje.el")
-  :bind (("C-c j" . jejeje-menu)))
-#+end_src
-
-*** With ~straight.el~
-If you use ~straight.el~ as the package backend for ~leaf~:
-
-#+begin_src elisp
-(leaf jejeje
-  :straight (jejeje :type git :host github :repo "wakamenod/jejeje.el")
-  :bind (("C-c j" . jejeje-menu)))
-#+end_src
-
-*** With ~el-get~
-If you use ~el-get~ as the package backend for ~leaf~:
-
-#+begin_src elisp
-(leaf jejeje
-  :el-get (jejeje :type github :pkgname "wakamenod/jejeje.el")
   :bind (("C-c j" . jejeje-menu)))
 #+end_src
 
 * Configuration
 
-You can customize the behavior of ~jejeje.el~ using ~M-x customize-group RET jejeje~ or by setting variables directly:
-
 #+begin_src elisp
-;; jejeje-executable is managed automatically; set only to override with a
-;; pre-installed binary (e.g. a locally built development build).
-(setq jejeje-executable "/usr/local/bin/je")
-
-(setq jejeje-test-command nil)         ; nil = auto-detect via quickrun (default)
-                                       ; Set to e.g. "./a.out" to pin a fixed command
-(setq jejeje-test-tle 2.0)             ; Default time-limit in seconds
-(setq jejeje-buffer-name "*jejeje*")   ; Name of the output buffer
-(setq jejeje-test-display-method       ; How to display `je test' results:
-      'posframe)                        ;   'posframe (default) or 'buffer
+(setq jejeje-executable "/usr/local/bin/je")  ; override managed binary
+(setq jejeje-test-command nil)                ; nil = auto-detect via quickrun
+(setq jejeje-test-tle 2.0)                    ; time-limit in seconds
+(setq jejeje-buffer-name "*jejeje*")          ; output buffer name
+(setq jejeje-test-display-method 'posframe)   ; 'posframe (default) or 'buffer
 #+end_src
 
-*** ~jejeje-test-command~ in detail
-
-| Value | Behaviour |
-|-------+-----------|
-| ~nil~ (default) | ~jejeje-test~ calls ~quickrun~ internally to detect the language from the buffer's file extension and derives compile + run commands automatically — *no prompt shown*. |
-| A string (e.g. ~"./a.out"~ ) | The string is used as the default in a ~read-string~ prompt, preserving the previous manual-entry behaviour. |
-
-/Tip: You can pin the command per-project using directory-local variables (~.dir-locals.el~):/
+Per-project override via ~.dir-locals.el~:
 
 #+begin_src elisp
-;; .dir-locals.el
 ((nil . ((jejeje-test-command . "./a.out"))))
 #+end_src
 
-*** ~jejeje-test-display-method~ in detail
-
-Controls how ~jejeje-test~ displays its results buffer.
-
-| Value | Behaviour |
-|-------+-----------|
-| ~'posframe~ (default) | Results appear in a floating child-frame centred in the current Emacs frame.  Requires the optional [[https://github.com/tumashu/posframe][posframe]] package; falls back to ~'buffer~ automatically if posframe is not installed. |
-| ~'buffer~ | Results are displayed via the standard ~display-buffer~ mechanism (a split window). |
-
-The display method is resolved in the following priority order each time ~jejeje-test~ is called:
-
-1. An explicit ~DISPLAY-METHOD~ argument (e.g. from a ~C-u~ prompt).
-2. The output buffer is already visible in a window → reuse it without change.
-3. ~posframe~ is installed and ~jejeje-test-display-method~ is ~'posframe~ → floating frame.
-4. Fallback → ~display-buffer~.
-
-When a posframe is open, press ~q~ inside it to dismiss the frame.
-
-~C-u M-x jejeje-test~ always opens a prompt to choose the display method (posframe / buffer) and to override the run command for that invocation, with the auto-detected command pre-filled as the default.
-
-* Submitting solutions
-
-~jejeje-submit~ fills in the language dropdown and source code editor on a judge's submission page by injecting JavaScript into an open ~xwidget-webkit~ session.  The submit button must be pressed manually (this lets you review the code and pass any CAPTCHA challenge the judge presents).
-
-** AtCoder
-
-1. Open the submit page for the target problem in the xwidget window (e.g. via ~jejeje-browse-problem~ followed by navigating to the Submit tab, or by visiting ~https://atcoder.jp/contests/<contest>/submit~ directly).
-2. Make sure you are logged in inside the xwidget session.
-3. With the source file open in Emacs, run ~M-x jejeje-submit~ (or ~s~ in ~jejeje-menu~).
-4. A ~completing-read~ prompt lists the available languages; the list is pre-filtered by the file extension using ~jejeje-language-alist~.
-5. After you confirm the selection, the language dropdown and the ACE editor widget are filled in automatically.  Press the *Submit* button on the page to finalize.
-
-** Codeforces
-
-The workflow is the same as AtCoder, with one convenience difference: you can invoke ~jejeje-submit~ from the *problem page* (~.../contest/NNN/problem/X~) and the xwidget will be redirected to the corresponding submit page (~.../contest/NNN/submit~) automatically, then ~jejeje-submit~ re-runs after a 2-second delay to allow the page to load.
-
-1. Open any Codeforces contest problem page in the xwidget window (e.g. ~https://codeforces.com/contest/1352/problem/A~), or navigate directly to the submit page.
-2. Make sure you are logged in inside the xwidget session.
-3. Run ~M-x jejeje-submit~.  If you are on a problem page, the xwidget navigates to the submit page and ~jejeje-submit~ is re-scheduled automatically — no further action needed.
-4. Choose the target language at the prompt.
-5. Press *Submit* on the Codeforces page.
-
-** yukicoder
-
-The submit form is embedded directly on the problem page, so no redirect is needed.
-
-1. Open the problem page in the xwidget window (e.g. ~https://yukicoder.me/problems/no/1234~).
-2. Make sure you are logged in inside the xwidget session.
-3. With the source file open in Emacs, run ~M-x jejeje-submit~ (or ~s~ in ~jejeje-menu~).
-4. Choose the target language at the prompt.
-5. Press *提出する* on the page to finalize.
-
-** AOJ (Aizu Online Judge)
-
-The submit editor is embedded directly on the problem page (~onlinejudge.u-aizu.ac.jp~), so no redirect is needed.  The language selector uses [[https://element-plus.org/][Element UI]]'s custom dropdown, so ~jejeje-submit~ opens the dropdown and clicks the matching item rather than manipulating a native ~<select>~.
-
-1. Open the problem page in the xwidget window (e.g. ~https://onlinejudge.u-aizu.ac.jp/challenges/sources/JOI/Prelim/0763~).
-2. Make sure you are logged in inside the xwidget session.
-3. With the source file open in Emacs, run ~M-x jejeje-submit~ (or ~s~ in ~jejeje-menu~).
-4. Choose the target language at the prompt.  Languages hidden by the judge (shown as invisible items in the dropdown) are automatically excluded.
-5. Press *Submit* on the page to finalize.
-
-** Adding support for other judges
-
-Push a new entry onto ~jejeje--submit-backend-alist~ with the URL regexp and three required functions before calling ~jejeje-submit~:
-
-#+begin_src elisp
-(push '("example\\.com"
-        :get-languages-js "JSON.stringify([…])"  ; JS → [{value, text}, …]
-        :set-language-js  (lambda (value) …)     ; (value) → JS string
-        :set-code-js      (lambda (code) …))     ; (code) → JS string
-      jejeje--submit-backend-alist)
-#+end_src
-
-An optional ~:redirect-url-fn~ key may also be provided: a function ~(URL) → string-or-nil~ that returns a URL to navigate to before injecting JS (useful when the submit form lives on a different page from the problem statement), or ~nil~ to skip the redirect.
-
 * Usage
 
-** Transient Menu (Recommended)
-Launch the interactive popup menu containing all available commands:
-~M-x jejeje-menu~ (or your bound key ~C-c j~).
-
-** Keymap Alternative
-Instead of a single command, you can also bind the entire prefix map ~jejeje-map~ to a prefix key:
+~M-x jejeje-menu~ (recommended) or bind the prefix map:
 
 #+begin_src elisp
 (global-set-key (kbd "C-c j") jejeje-map)
 #+end_src
 
-Inside ~jejeje-map~, the following default single-key bindings are available:
-- ~p~ : ~jejeje-prepare~
-- ~t~ : ~jejeje-test~
-- ~s~ : ~jejeje-submit~
-- ~i~ : ~jejeje-info~
-- ~w~ : ~jejeje-browse-problem~
-- ~m~ : ~jejeje-menu~
+Default key bindings:
+
+| Key | Command                |
+|-----+------------------------|
+| ~p~ | ~jejeje-prepare~       |
+| ~t~ | ~jejeje-test~          |
+| ~s~ | ~jejeje-submit-problem~ |
+| ~i~ | ~jejeje-info~          |
+| ~w~ | ~jejeje-browse-problem~ |
+| ~T~ | ~jejeje-template~      |
+| ~V~ | ~jejeje-version~       |
+| ~m~ | ~jejeje-menu~          |
 
 * Development
 
-** Running Tests
-
-The test suite uses [[https://www.gnu.org/software/emacs/manual/html_node/ert/][ERT]] (Emacs Lisp Regression Testing) and is managed via [[https://emacs-eask.github.io/][Eask]].
-
-*** Prerequisites
-
-Install Eask if you have not already:
-
 #+begin_src sh
-npm install -g @emacs-eask/cli
-#+end_src
-
-*** Install dependencies
-
-#+begin_src sh
-eask install-deps
-#+end_src
-
-*** Run all tests
-
-Byte-compiles the package first, then runs the full ERT suite:
-
-#+begin_src sh
-eask run test
-#+end_src
-
-*** Run ERT only (skip byte-compilation)
-
-#+begin_src sh
-eask test ert test/*.el
-#+end_src
-
-*** Run tests interactively in Emacs
-
-Open ~test/jejeje-test.el~ in Emacs, then:
-
-#+begin_src text
-M-x ert RET t RET
+just lint && just test && just package
 #+end_src
 
 * License
