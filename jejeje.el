@@ -354,21 +354,24 @@ For \\='buffer: falls back to the standard `display-buffer' function."
      ;; here to keep the *jejeje* buffer alive for the process output.
      (when (posframe-workable-p)
        (posframe-hide buf))
-     (posframe-show
-      buf
-      :position (point)
-      :poshandler #'posframe-poshandler-frame-center
-      :width  (min 100 (round (* (frame-width)  0.75)))
-      :height (min 30  (round (* (frame-height) 0.60)))
-      :border-width 2
-      :border-color (face-foreground 'shadow nil t)
-      :accept-focus t)
-     ;; Bind q locally so the user can dismiss the posframe.
-     (with-current-buffer buf
-       (local-set-key (kbd "q")
-                      (lambda ()
-                        (interactive)
-                        (posframe-hide buf)))))
+     ;; Remember the calling frame so we can restore focus when q is pressed.
+     (let ((origin-frame (selected-frame)))
+       (posframe-show
+        buf
+        :position (point)
+        :poshandler #'posframe-poshandler-frame-center
+        :width  (min 100 (round (* (frame-width)  0.75)))
+        :height (min 30  (round (* (frame-height) 0.60)))
+        :border-width 2
+        :border-color (face-foreground 'shadow nil t)
+        :accept-focus t)
+       ;; Bind q locally so the user can dismiss the posframe and return focus.
+       (with-current-buffer buf
+         (local-set-key (kbd "q")
+                        (lambda ()
+                          (interactive)
+                          (posframe-hide buf)
+                          (select-frame-set-input-focus origin-frame))))))
     (_
      (display-buffer buf))))
 
