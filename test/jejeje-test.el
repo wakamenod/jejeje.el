@@ -2187,5 +2187,66 @@ when the `je' binary does not exist."
           (setq jejeje-executable original-executable))))))
 
 
+;;; ─── jejeje-update ───────────────────────────────────────────────────────────
+
+(ert-deftest jejeje-update/already-up-to-date ()
+  "Reports up-to-date when installed version matches the latest release tag.
+The fake release tag_name is \"v9.9.9\", so installed version \"je 9.9.9\"
+passes the `string-match-p' check and no download should occur."
+  (cl-letf (((symbol-function 'jejeje--fetch-latest-release)
+             (lambda () jejeje-test--fake-release-data))
+            ((symbol-function 'jejeje--installed-version)
+             (lambda () "je 9.9.9")))
+    (let ((msgs '()))
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args)
+                   (push (apply #'format fmt args) msgs))))
+        (jejeje-update)
+        (should (cl-some (lambda (m) (string-match-p "up to date" m)) msgs))))))
+
+(ert-deftest jejeje-update/downloads-when-outdated ()
+  "Calls `jejeje--download-and-install' and updates `jejeje-executable'
+when the installed version is older than the latest release."
+  (jejeje-test--with-temp-dir
+    (let* ((jejeje--executable-dir default-directory)
+           (bin (jejeje--executable-path))
+           (original-executable jejeje-executable)
+           (install-called nil))
+      (write-region "" nil bin)
+      (set-file-modes bin #o755)
+      (cl-letf (((symbol-function 'jejeje--fetch-latest-release)
+                 (lambda () jejeje-test--fake-release-data))
+                ((symbol-function 'jejeje--installed-version)
+                 (lambda () "je 0.0.1"))
+                ((symbol-function 'jejeje--download-and-install)
+                 (lambda (_r) (setq install-called t) bin)))
+        (unwind-protect
+            (progn
+              (jejeje-update)
+              (should install-called)
+              (should (equal bin jejeje-executable)))
+          (setq jejeje-executable original-executable))))))
+
+(ert-deftest jejeje-update/downloads-when-not-installed ()
+  "Calls `jejeje--download-and-install' when no binary is installed yet."
+  (jejeje-test--with-temp-dir
+    (let* ((jejeje--executable-dir default-directory)
+           (bin (jejeje--executable-path))
+           (original-executable jejeje-executable)
+           (install-called nil))
+      (write-region "" nil bin)
+      (set-file-modes bin #o755)
+      (cl-letf (((symbol-function 'jejeje--fetch-latest-release)
+                 (lambda () jejeje-test--fake-release-data))
+                ((symbol-function 'jejeje--installed-version)
+                 (lambda () nil))
+                ((symbol-function 'jejeje--download-and-install)
+                 (lambda (_r) (setq install-called t) bin)))
+        (unwind-protect
+            (progn
+              (jejeje-update)
+              (should install-called))
+          (setq jejeje-executable original-executable))))))
+
 (provide 'jejeje-test)
 ;;; jejeje-test.el ends here

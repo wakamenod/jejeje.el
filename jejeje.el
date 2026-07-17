@@ -1248,6 +1248,29 @@ Shows a notice instead when the binary has not been downloaded yet."
         (message "%s" version)
       (message "Jejeje: `je' binary not found — invoke any jejeje command to download it"))))
 
+;;;###autoload
+(defun jejeje-update ()
+  "Update the `je' binary to the latest release from GitHub.
+Fetches the latest release metadata synchronously, then compares it with
+the currently installed version.  If a newer version is available it is
+downloaded and installed immediately, and the result is reported via
+`message'.  If the binary is already up to date, a notice is shown instead."
+  (interactive)
+  (message "Jejeje: checking for `je' updates…")
+  (condition-case err
+      (let* ((release  (jejeje--fetch-latest-release))
+             (latest   (gethash "tag_name" release))
+             (installed (jejeje--installed-version)))
+        (if (and installed
+                 (string-match-p (regexp-quote (string-remove-prefix "v" latest))
+                                 installed))
+            (message "Jejeje: `je' is already up to date (%s)" installed)
+          (jejeje--download-and-install release)
+          (setq jejeje-executable (jejeje--executable-path))
+          (message "Jejeje: `je' updated to %s" latest)))
+    (error
+     (user-error "Jejeje: update failed: %s" (error-message-string err)))))
+
 
 ;;; ─── Transient menu ───────────────────────────────────────────────────────────
 
