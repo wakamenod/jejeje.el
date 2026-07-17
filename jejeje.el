@@ -1138,8 +1138,8 @@ notice is shown in the minibuffer."
                           (window-list)))
                (target-win (or existing-win
                                (split-window-right))))
-          (select-window target-win)
-          (xwidget-webkit-browse-url url))
+          (with-selected-window target-win
+            (xwidget-webkit-browse-url url)))
       ;; xwidget not available: fall back to external browser
       (browse-url url))))
 
