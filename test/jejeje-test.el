@@ -2187,9 +2187,9 @@ when the `je' binary does not exist."
           (setq jejeje-executable original-executable))))))
 
 
-;;; ─── jejeje-update ───────────────────────────────────────────────────────────
+;;; ─── jejeje-update-executable ────────────────────────────────────────────────
 
-(ert-deftest jejeje-update/already-up-to-date ()
+(ert-deftest jejeje-update-executable/already-up-to-date ()
   "Reports up-to-date when installed version matches the latest release tag.
 The fake release tag_name is \"v9.9.9\", so installed version \"je 9.9.9\"
 passes the `string-match-p' check and no download should occur."
@@ -2201,10 +2201,10 @@ passes the `string-match-p' check and no download should occur."
       (cl-letf (((symbol-function 'message)
                  (lambda (fmt &rest args)
                    (push (apply #'format fmt args) msgs))))
-        (jejeje-update)
+        (jejeje-update-executable)
         (should (cl-some (lambda (m) (string-match-p "up to date" m)) msgs))))))
 
-(ert-deftest jejeje-update/downloads-when-outdated ()
+(ert-deftest jejeje-update-executable/downloads-when-outdated ()
   "Calls `jejeje--download-and-install' and updates `jejeje-executable'
 when the installed version is older than the latest release."
   (jejeje-test--with-temp-dir
@@ -2222,12 +2222,12 @@ when the installed version is older than the latest release."
                  (lambda (_r) (setq install-called t) bin)))
         (unwind-protect
             (progn
-              (jejeje-update)
+              (jejeje-update-executable)
               (should install-called)
               (should (equal bin jejeje-executable)))
           (setq jejeje-executable original-executable))))))
 
-(ert-deftest jejeje-update/downloads-when-not-installed ()
+(ert-deftest jejeje-update-executable/downloads-when-not-installed ()
   "Calls `jejeje--download-and-install' when no binary is installed yet."
   (jejeje-test--with-temp-dir
     (let* ((jejeje--executable-dir default-directory)
@@ -2244,7 +2244,7 @@ when the installed version is older than the latest release."
                  (lambda (_r) (setq install-called t) bin)))
         (unwind-protect
             (progn
-              (jejeje-update)
+              (jejeje-update-executable)
               (should install-called))
           (setq jejeje-executable original-executable))))))
 

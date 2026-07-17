@@ -1249,7 +1249,7 @@ Shows a notice instead when the binary has not been downloaded yet."
       (message "Jejeje: `je' binary not found — invoke any jejeje command to download it"))))
 
 ;;;###autoload
-(defun jejeje-update ()
+(defun jejeje-update-executable ()
   "Update the `je' binary to the latest release from GitHub.
 Fetches the latest release metadata synchronously, then compares it with
 the currently installed version.  If a newer version is available it is
